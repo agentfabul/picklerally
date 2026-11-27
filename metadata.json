@@ -1,0 +1,6 @@
+{
+  "name": "Pickle Rally",
+  "description": "Android pickleball game built with Kotlin and Jetpack Compose featuring solo, 2v2 doubles, nearby multiplayer, interactive tutorials, and stats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

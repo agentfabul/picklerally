@@ -1,0 +1,275 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() == 7 && code.matches('^PKL-[0-9]{3}$');
+    }
+
+    function isValidCharacterId(id) {
+      return id in ['RIO', 'LOLA', 'BERT', 'DILL', 'MAYA', 'KAI', 'ZOE', 'GUS', 'NINA', 'DUKE'];
+    }
+
+    function isValidStatInt(val, maxVal) {
+      return val is int && val >= 0 && val <= maxVal;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'characterId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'characterId',
+          'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid is string
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 32
+        && isValidCharacterId(data.characterId)
+        && (!('wins' in data) || isValidStatInt(data.wins, 100000))
+        && (!('losses' in data) || isValidStatInt(data.losses, 100000))
+        && (!('matchesPlayed' in data) || isValidStatInt(data.matchesPlayed, 200000))
+        && (!('pointsScored' in data) || isValidStatInt(data.pointsScored, 5000000))
+        && (!('bestRally' in data) || isValidStatInt(data.bestRally, 999))
+        && (!('rating' in data) || (data.rating is int && data.rating >= 800 && data.rating <= 5000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomDirectoryEntry(data, roomCode) {
+      return data.keys().hasAll(['roomCode', 'hostUid', 'mode', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomCode', 'hostUid', 'guestUid', 'mode', 'status', 'createdAt', 'updatedAt'])
+        && data.roomCode is string
+        && data.roomCode == roomCode
+        && isValidId(data.hostUid)
+        && (!('guestUid' in data) || isValidId(data.guestUid))
+        && data.mode in ['SINGLES_1V1', 'DOUBLES_2V2']
+        && data.status in ['WAITING', 'PLAYING', 'HOST_LEFT', 'FINISHED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMatchRecord(data, matchId) {
+      return data.keys().hasAll([
+          'matchId', 'mode', 'scoringMode', 'createdByUid', 'participants',
+          'playerCharacter', 'opponentCharacter', 'winnerSide',
+          'scoreLower', 'scoreUpper', 'bestRally', 'validated', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'matchId', 'roomCode', 'mode', 'scoringMode', 'createdByUid', 'participants',
+          'playerCharacter', 'partnerCharacter', 'opponentCharacter', 'winnerSide',
+          'scoreLower', 'scoreUpper', 'bestRally', 'validated', 'createdAt'
+        ])
+        && data.matchId is string
+        && data.matchId == matchId
+        && (!('roomCode' in data) || (data.roomCode is string && data.roomCode.size() >= 1 && data.roomCode.size() <= 16))
+        && data.mode in ['SOLO_1V1', 'SOLO_2V2', 'SINGLES_1V1', 'DOUBLES_2V2']
+        && data.scoringMode in ['RALLY', 'SIDE_OUT']
+        && isValidId(data.createdByUid)
+        && data.participants is list
+        && data.participants.size() >= 1
+        && data.participants.size() <= 4
+        && data.participants[0] is string
+        && data.participants[0].size() <= 128
+        && request.auth.uid in data.participants
+        && isValidCharacterId(data.playerCharacter)
+        && (!('partnerCharacter' in data) || isValidCharacterId(data.partnerCharacter))
+        && isValidCharacterId(data.opponentCharacter)
+        && data.winnerSide in ['LOWER', 'UPPER']
+        && data.scoreLower is int && data.scoreLower >= 0 && data.scoreLower <= 99
+        && data.scoreUpper is int && data.scoreUpper >= 0 && data.scoreUpper <= 99
+        && (data.scoreLower >= 11 || data.scoreUpper >= 11)
+        && ((data.scoreLower - data.scoreUpper >= 2) || (data.scoreUpper - data.scoreLower >= 2))
+        && ((data.winnerSide == 'LOWER' && data.scoreLower > data.scoreUpper)
+            || (data.winnerSide == 'UPPER' && data.scoreUpper > data.scoreLower))
+        && isValidStatInt(data.bestRally, 999)
+        && data.validated is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidLeaderboardEntry(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'characterId',
+          'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
+          'isPublic', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'characterId',
+          'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
+          'isPublic', 'updatedAt'
+        ])
+        && data.uid is string
+        && data.uid == userId
+        && isValidId(data.uid)
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 32
+        && isValidCharacterId(data.characterId)
+        && isValidStatInt(data.wins, 100000)
+        && isValidStatInt(data.losses, 100000)
+        && isValidStatInt(data.matchesPlayed, 200000)
+        && data.matchesPlayed == data.wins + data.losses
+        && isValidStatInt(data.pointsScored, 5000000)
+        && isValidStatInt(data.bestRally, 999)
+        && data.rating is int && data.rating >= 800 && data.rating <= 5000
+        && data.isPublic is bool
+        && data.updatedAt is timestamp;
+    }
+
+    // Connection check document (read-only ping)
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (!('wins' in incoming()) || incoming().wins == 0)
+        && (!('losses' in incoming()) || incoming().losses == 0)
+        && (!('matchesPlayed' in incoming()) || incoming().matchesPlayed == 0)
+        && (!('rating' in incoming()) || incoming().rating == 1000);
+
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'characterId',
+          'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
+          'updatedAt'
+        ])
+        && (!('wins' in incoming()) || (
+          'losses' in incoming() && 'matchesPlayed' in incoming() &&
+          incoming().matchesPlayed == incoming().wins + incoming().losses &&
+          (!('wins' in existing())
+            ? (incoming().wins <= 1 && incoming().losses <= 1)
+            : (incoming().wins >= existing().wins && incoming().wins <= existing().wins + 1 &&
+               incoming().losses >= existing().losses && incoming().losses <= existing().losses + 1))
+        ));
+
+      allow delete: if false;
+    }
+
+    match /rooms/{roomCode} {
+      allow get: if isSignedIn() && isValidRoomCode(roomCode);
+      allow list: if isSignedIn() && (resource.data.hostUid == request.auth.uid || resource.data.status == 'WAITING');
+
+      allow create: if isSignedIn()
+        && isValidRoomCode(roomCode)
+        && isValidRoomDirectoryEntry(incoming(), roomCode)
+        && incoming().hostUid == request.auth.uid
+        && incoming().status == 'WAITING'
+        && !('guestUid' in incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidRoomCode(roomCode)
+        && isValidRoomDirectoryEntry(incoming(), roomCode)
+        && existing().status in ['WAITING', 'PLAYING']
+        && incoming().roomCode == existing().roomCode
+        && incoming().hostUid == existing().hostUid
+        && incoming().mode == existing().mode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (existing().status == 'WAITING'
+            && !('guestUid' in existing())
+            && incoming().guestUid == request.auth.uid
+            && incoming().hostUid != request.auth.uid
+            && incoming().status == 'PLAYING'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['guestUid', 'status', 'updatedAt']))
+          ||
+          (existing().hostUid == request.auth.uid
+            && incoming().status in ['HOST_LEFT', 'FINISHED']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+
+      allow delete: if false;
+    }
+
+    match /matches/{matchId} {
+      allow get: if isSignedIn() && isValidId(matchId) && request.auth.uid in resource.data.participants;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn()
+        && isValidId(matchId)
+        && isValidMatchRecord(incoming(), matchId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().validated == false
+        && incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /leaderboard/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && resource.data.isPublic == true;
+      allow list: if isSignedIn() && resource.data.isPublic == true;
+
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().isPublic == true
+        && incoming().wins <= 1
+        && incoming().losses <= 1
+        && incoming().matchesPlayed <= 1
+        && incoming().rating >= 980
+        && incoming().rating <= 1030
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().isPublic == true
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'characterId',
+          'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
+          'updatedAt'
+        ])
+        && incoming().wins >= existing().wins
+        && incoming().wins <= existing().wins + 1
+        && incoming().losses >= existing().losses
+        && incoming().losses <= existing().losses + 1
+        && incoming().rating <= existing().rating + 30;
+
+      allow delete: if false;
+    }
+  }
+}

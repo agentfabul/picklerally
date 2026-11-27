@@ -1,0 +1,246 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Player profile, cosmetic fighter selection, and cumulative career stats",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "characterId": {
+          "type": "string",
+          "enum": ["RIO", "LOLA", "BERT", "DILL", "MAYA", "KAI", "ZOE", "GUS", "NINA", "DUKE"]
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "matchesPlayed": {
+          "type": "integer"
+        },
+        "pointsScored": {
+          "type": "integer"
+        },
+        "bestRally": {
+          "type": "integer"
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "characterId", "createdAt", "updatedAt"]
+    },
+    "RoomDirectoryEntry": {
+      "title": "RoomDirectoryEntry",
+      "description": "Firestore directory metadata mirroring active 1v1 and 2v2 RTDB rooms",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "pattern": "^PKL-[0-9]{3}$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "guestUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["SINGLES_1V1", "DOUBLES_2V2"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["WAITING", "PLAYING", "HOST_LEFT", "FINISHED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["roomCode", "hostUid", "mode", "status", "createdAt", "updatedAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Finished pickleball match record queued for Cloud Function validation",
+      "type": "object",
+      "properties": {
+        "matchId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomCode": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["SOLO_1V1", "SOLO_2V2", "SINGLES_1V1", "DOUBLES_2V2"]
+        },
+        "scoringMode": {
+          "type": "string",
+          "enum": ["RALLY", "SIDE_OUT"]
+        },
+        "createdByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "participants": {
+          "type": "array"
+        },
+        "playerCharacter": {
+          "type": "string",
+          "enum": ["RIO", "LOLA", "BERT", "DILL", "MAYA", "KAI", "ZOE", "GUS", "NINA", "DUKE"]
+        },
+        "partnerCharacter": {
+          "type": "string",
+          "enum": ["RIO", "LOLA", "BERT", "DILL", "MAYA", "KAI", "ZOE", "GUS", "NINA", "DUKE"]
+        },
+        "opponentCharacter": {
+          "type": "string",
+          "enum": ["RIO", "LOLA", "BERT", "DILL", "MAYA", "KAI", "ZOE", "GUS", "NINA", "DUKE"]
+        },
+        "winnerSide": {
+          "type": "string",
+          "enum": ["LOWER", "UPPER"]
+        },
+        "scoreLower": {
+          "type": "integer"
+        },
+        "scoreUpper": {
+          "type": "integer"
+        },
+        "bestRally": {
+          "type": "integer"
+        },
+        "validated": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "matchId",
+        "mode",
+        "scoringMode",
+        "createdByUid",
+        "participants",
+        "playerCharacter",
+        "opponentCharacter",
+        "winnerSide",
+        "scoreLower",
+        "scoreUpper",
+        "bestRally",
+        "validated",
+        "createdAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public non-PII player ranking entry",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "characterId": {
+          "type": "string",
+          "enum": ["RIO", "LOLA", "BERT", "DILL", "MAYA", "KAI", "ZOE", "GUS", "NINA", "DUKE"]
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "matchesPlayed": {
+          "type": "integer"
+        },
+        "pointsScored": {
+          "type": "integer"
+        },
+        "bestRally": {
+          "type": "integer"
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "characterId",
+        "wins",
+        "losses",
+        "matchesPlayed",
+        "pointsScored",
+        "bestRally",
+        "rating",
+        "isPublic",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only player profile and career summary"
+    },
+    "/rooms/{roomCode}": {
+      "schema": { "$ref": "#/entities/RoomDirectoryEntry" },
+      "description": "Active multiplayer room directory entries (high-frequency state lives in RTDB)"
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/MatchRecord" },
+      "description": "Finished match history records validated by Cloud Functions"
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public non-PII leaderboard entries sorted by rating"
+    }
+  }
+}
