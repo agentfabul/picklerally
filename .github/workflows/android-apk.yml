@@ -1,0 +1,97 @@
+name: Android APK
+
+# Builds the Pickle Rally Android app and publishes the APK as a GitHub Release
+# so it can be downloaded and installed on any Android phone.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      # The app signs with ${rootDir}/debug.keystore (see app/build.gradle.kts).
+      # Use the same keystore as AI Studio (secret DEBUG_KEYSTORE_BASE64) so the SHA-1
+      # matches Firebase and Google sign-in works. Without the secret, a new keystore
+      # is generated: the APK still installs, but Google sign-in needs its SHA-1 added
+      # in Firebase (printed below).
+      - name: Prepare signing keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+            echo "Using keystore from DEBUG_KEYSTORE_BASE64 secret"
+          elif [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+            echo "Using keystore from debug.keystore.base64 in the repo"
+          else
+            keytool -genkeypair -v -keystore debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            echo "::warning::No DEBUG_KEYSTORE_BASE64 secret - generated a new keystore. Add its SHA-1 to Firebase for Google sign-in."
+          fi
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1|SHA256"
+
+      - name: Build APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Name the APK
+        id: apk
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts || echo "1.0.0")
+          cp "$APK" PickleRally.apk
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PickleRally-apk
+          path: PickleRally.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          name: Pickle Rally ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
+          make_latest: true
+          files: PickleRally.apk
+          body: |
+            ## Install on Android
+            1. Download **PickleRally.apk** below on your Android phone.
+            2. Open it. If asked, allow your browser to **install unknown apps**.
+            3. Tap **Install**, then open Pickle Rally.
+
+            Updating: install the new APK over the old one; your local progress stays.
+
+            Built from commit ${{ github.sha }}.
