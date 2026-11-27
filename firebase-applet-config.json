@@ -1,12 +1,10 @@
 {
-  "projectId": "fourth-ether-kpd8p",
-  "appId": "1:257792385006:web:8c6aa0a6e98076bdd578ff",
-  "apiKey": "AIzaSyCTTuZgnEUC-mv8KqzWSA6K4hmKoK-G13o",
-  "authDomain": "fourth-ether-kpd8p.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-picklerally-f6f8fee0-5f87-4cbb-863e-127c5efc486f",
-  "storageBucket": "fourth-ether-kpd8p.firebasestorage.app",
-  "messagingSenderId": "257792385006",
-  "measurementId": "",
-  "oAuthClientId": "257792385006-8k83n41ldrjp8sd5vu8mm25f3emt70ui.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "gen-lang-client-0455784437",
+  "appId": "1:79708452669:web:9fe91772c9f6319baeb754",
+  "apiKey": "AIzaSyCPah1LfS9fLoAlh_8ui9VE1A4xqzcxz64",
+  "authDomain": "gen-lang-client-0455784437.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-android-pickleba-2d0444a4-b084-452c-8b43-778192b9db41",
+  "storageBucket": "gen-lang-client-0455784437.firebasestorage.app",
+  "messagingSenderId": "79708452669",
+  "measurementId": ""
 }
