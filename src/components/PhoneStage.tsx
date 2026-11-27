@@ -1,3 +1,5 @@
+import { signOut } from 'firebase/auth';
+import { auth as firebaseAuth } from '../game/firebaseClient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -690,6 +692,37 @@ export function PhoneStage() {
 
             {/* Mode & Play Controls */}
             <div className="relative z-10 flex flex-col gap-2.5 px-5 pb-6">
+              {/* Account: Google sign-in for cloud stats & rankings */}
+              {authUser && !authUser.isAnonymous ? (
+                <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-[#0B1220]/90 px-3 py-2 text-[11px]">
+                  <span className="truncate text-slate-300">
+                    Signed in as{' '}
+                    <span className="font-semibold text-white">
+                      {authUser.displayName || authUser.email || 'Player'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void signOut(firebaseAuth)}
+                    className="shrink-0 cursor-pointer text-slate-400 hover:text-white"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => void handleGoogleSignIn()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#0B1220]/90 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+                >
+                  <LogIn className="h-3.5 w-3.5" />
+                  <span>{authBusy ? 'Signing in…' : 'Sign in with Google to save stats & rankings'}</span>
+                </button>
+              )}
+              {roomError && (
+                <div className="text-center text-[11px] text-rose-400">{roomError}</div>
+              )}
               <div className="grid w-full grid-cols-4 gap-1 rounded-xl border border-white/10 bg-[#0B1220]/90 p-1">
                 <button
                   type="button"
