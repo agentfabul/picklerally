@@ -23,6 +23,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -93,9 +95,12 @@ jobs:
           name: PickleRally-apk
           path: PickleRally.apk
 
-      - name: Publish GitHub Release
+      - name: Publish release to public download repo
+        if: env.HAS_RELEASES_TOKEN == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          repository: agentfabul/pickle-rally
+          token: ${{ secrets.RELEASES_TOKEN }}
           tag_name: ${{ steps.apk.outputs.tag }}
           name: Pickle Rally ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
           make_latest: true
@@ -107,5 +112,22 @@ jobs:
             3. Tap **Install**, then open Pickle Rally.
 
             Updating: install the new APK over the old one; your local progress stays.
+
+            Prefer the browser? Play at https://picklerally-two.vercel.app
+
+      # Fallback until the RELEASES_TOKEN secret exists: publish in this private repo.
+      - name: Publish release to this repo (no RELEASES_TOKEN yet)
+        if: env.HAS_RELEASES_TOKEN != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          name: Pickle Rally ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
+          make_latest: true
+          files: PickleRally.apk
+          body: |
+            ## Install on Android
+            1. Download **PickleRally.apk** below on your Android phone.
+            2. Open it. If asked, allow your browser to **install unknown apps**.
+            3. Tap **Install**, then open Pickle Rally.
 
             Built from commit ${{ github.sha }}.
