@@ -534,7 +534,7 @@ export function PhoneStage() {
   return (
     <div className="flex flex-col items-center justify-center">
       {/* Portrait Phone Frame mirroring DesktopLauncher (450x900, 1:2 FitViewport) */}
-      <div className="relative flex aspect-[1/2] h-[min(86vh,760px)] w-auto max-w-full flex-col overflow-hidden rounded-[28px] border border-slate-700/80 bg-[#15223B] shadow-2xl">
+      <div className="relative flex aspect-[1/2] h-[min(86vh,760px)] w-auto max-w-full flex-col overflow-hidden rounded-[28px] border border-slate-700/80 bg-[#15223B] shadow-2xl max-sm:aspect-auto max-sm:h-[100dvh] max-sm:w-screen max-sm:max-w-none max-sm:rounded-none max-sm:border-0 max-sm:shadow-none">
         {/* Loading screen (app open) */}
         {showSplash && (
           <button
