@@ -1,3 +1,27 @@
 <resources>
     <string name="app_name">Pickle Rally</string>
+    <string name="skip_loading">Skip loading screen</string>
+    <string name="splash_image_desc">Pickle Rally splash artwork</string>
+    <string name="stats_and_ranks">Stats &amp; Ranks</string>
+    <string name="learn">Learn</string>
+    <string name="back">Back</string>
+    <string name="roster">Roster</string>
+    <string name="select_fighter">Select Fighter</string>
+    <string name="cosmetic_equal_stats">Cosmetic only · Equal stats</string>
+    <string name="doubles_partner_label">2v2 Doubles Partner</string>
+    <string name="primary_opponent_label">Primary Opponent</string>
+    <string name="learn_pickleball">Learn Pickleball</string>
+    <string name="rules_attribution">Rules summarized from the official USA Pickleball rulebook.</string>
+    <string name="match_settings">Match settings</string>
+    <string name="done">Done</string>
+    <string name="online_coming_soon_title">This feature is available soon</string>
+    <string name="online_coming_soon_body">Online 1v1 is coming in a future update. For now, play Solo, 2v2, or Nearby with a friend next to you.</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="sign_out">Sign out</string>
+    <string name="serve_diagonal">Serve Diagonal</string>
+    <string name="resume_match">Resume Match</string>
+    <string name="restart_match">Restart Match</string>
+    <string name="change_character">Change Character</string>
+    <string name="return_to_title">Return to Title</string>
+    <string name="play_again">Play Again</string>
 </resources>

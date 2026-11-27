@@ -151,8 +151,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && isValidId(userId)
         && isValidUserProfile(incoming(), userId)
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time
+        && incoming().createdAt is timestamp && incoming().createdAt <= request.time
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time
         && (!('wins' in incoming()) || incoming().wins == 0)
         && (!('losses' in incoming()) || incoming().losses == 0)
         && (!('matchesPlayed' in incoming()) || incoming().matchesPlayed == 0)
@@ -164,7 +164,7 @@ service cloud.firestore {
         && isValidUserProfile(incoming(), userId)
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'displayName', 'characterId',
           'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
@@ -192,8 +192,8 @@ service cloud.firestore {
         && incoming().hostUid == request.auth.uid
         && incoming().status == 'WAITING'
         && !('guestUid' in incoming())
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().createdAt is timestamp && incoming().createdAt <= request.time
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
 
       allow update: if isSignedIn()
         && isValidRoomCode(roomCode)
@@ -203,7 +203,7 @@ service cloud.firestore {
         && incoming().hostUid == existing().hostUid
         && incoming().mode == existing().mode
         && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time
         && (
           (existing().status == 'WAITING'
             && !('guestUid' in existing())
@@ -229,7 +229,7 @@ service cloud.firestore {
         && isValidMatchRecord(incoming(), matchId)
         && incoming().createdByUid == request.auth.uid
         && incoming().validated == false
-        && incoming().createdAt == request.time;
+        && incoming().createdAt is timestamp && incoming().createdAt <= request.time;
 
       allow update: if false;
       allow delete: if false;
@@ -249,7 +249,7 @@ service cloud.firestore {
         && incoming().matchesPlayed <= 1
         && incoming().rating >= 980
         && incoming().rating <= 1030
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
 
       allow update: if isSignedIn()
         && isValidId(userId)
@@ -257,7 +257,7 @@ service cloud.firestore {
         && isValidLeaderboardEntry(incoming(), userId)
         && incoming().uid == existing().uid
         && incoming().isPublic == true
-        && incoming().updatedAt == request.time
+        && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'displayName', 'characterId',
           'wins', 'losses', 'matchesPlayed', 'pointsScored', 'bestRally', 'rating',
