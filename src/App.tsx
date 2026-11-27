@@ -3,7 +3,24 @@ import { Code2, Smartphone } from 'lucide-react';
 import { PhoneStage } from './components/PhoneStage';
 import { WorkbenchPanel } from './components/WorkbenchPanel';
 
+// Players only see the game. The developer workbench (Source Files / Architecture / Checks)
+// shows in local dev, or on the live site when the URL has ?dev (e.g. /?dev).
+const SHOW_WORKBENCH: boolean =
+  Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) ||
+  (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev'));
+
 export default function App() {
+  if (!SHOW_WORKBENCH) {
+    return (
+      <main className="flex h-[100dvh] w-screen items-center justify-center overflow-hidden bg-[#0B1220] text-[#F8FAFC] sm:p-4">
+        <PhoneStage />
+      </main>
+    );
+  }
+  return <DevWorkspace />;
+}
+
+function DevWorkspace() {
   const [mobileView, setMobileView] = useState<'court' | 'workbench'>('court');
 
   return (
