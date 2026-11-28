@@ -60,6 +60,8 @@ data class MatchStateSnapshot(
     val lastEvent: String?,
     val matchWinner: String?,
     val publishedAtMs: Long,
+    val lastHitterSide: String? = null,
+    val ballBouncesOnSide: Int = 0,
 )
 
 object RoomCodeGenerator {
@@ -150,6 +152,11 @@ class OnlineMatch1v1(
         private set
     var matchWinnerLocal: Boolean? = null
         private set
+    var syncedRallyShotCount: Int = 0
+        private set
+    var syncedBallBouncesOnSide: Int = 0
+        private set
+    private var syncedBallLastHitterLocal: Boolean = false
 
     var autoSwingEnabled: Boolean = true
     private var autoSwingPrevDist = Float.POSITIVE_INFINITY
@@ -172,6 +179,29 @@ class OnlineMatch1v1(
         if (isHost) {
             setupPointForServe()
         }
+    }
+
+    fun currentServeAssignment(): ServeAssignment {
+        if (isHost) return rules.currentServeAssignment()
+        val servingSide = if (servingLocal) CourtSide.LOWER else CourtSide.UPPER
+        val servingScore = if (servingLocal) scoreLocal else scoreRemote
+        val isEvenScore = servingScore % 2 == 0
+        val serverBox = when (servingSide) {
+            CourtSide.LOWER -> if (isEvenScore) ServiceBoxSide.RIGHT else ServiceBoxSide.LEFT
+            CourtSide.UPPER -> if (isEvenScore) ServiceBoxSide.LEFT else ServiceBoxSide.RIGHT
+        }
+        val targetBox =
+            if (serverBox == ServiceBoxSide.RIGHT) ServiceBoxSide.LEFT else ServiceBoxSide.RIGHT
+        val targetCourtSide =
+            if (servingSide == CourtSide.LOWER) CourtSide.UPPER else CourtSide.LOWER
+        return ServeAssignment(
+            servingSide = servingSide,
+            serverIndexInTeam = 0,
+            serverNumberCall = 1,
+            serverBox = serverBox,
+            targetCourtSide = targetCourtSide,
+            targetBox = targetBox,
+        )
     }
 
     fun setupPointForServe() {
@@ -245,9 +275,30 @@ class OnlineMatch1v1(
         ball.crossedNetSinceHit = false
     }
 
+    fun activeRallyShotCount(): Int = if (isHost) rules.rallyShotCount else syncedRallyShotCount
+
+    fun activeBallBouncesOnSide(): Int = if (isHost) ball.bouncesOnCurrentSide else syncedBallBouncesOnSide
+
+    fun localPlayerHitState(): PlayerHitState {
+        if (rallyPhase != RallyPhase.RALLY_LIVE || !ball.active) return PlayerHitState.NONE
+        val hitByLocal = if (isHost) ball.lastHitterSide == CourtSide.LOWER else syncedBallLastHitterLocal
+        if (hitByLocal) return PlayerHitState.NONE
+        val dist = hypot(ball.x - localPlayer.x, ball.y - localPlayer.y)
+        if (dist > LOCAL_HIT_REACH_FT || ball.y > CourtSpec.NET_Y + 0.8f) return PlayerHitState.NONE
+        if (ball.z > MAX_HIT_HEIGHT_FT) return PlayerHitState.TOO_HIGH
+        val shotCount = activeRallyShotCount()
+        val bounces = activeBallBouncesOnSide()
+        if (bounces == 0) {
+            if (shotCount == 1 || shotCount == 2) return PlayerHitState.WAIT_BOUNCE
+            if (CourtSpec.isInKitchen(localPlayer.x, localPlayer.y, CourtSide.LOWER)) return PlayerHitState.KITCHEN
+        }
+        return PlayerHitState.READY
+    }
+
     fun canLocalReachBall(): Boolean {
         if (rallyPhase != RallyPhase.RALLY_LIVE || !ball.active) return false
-        if (isHost && ball.lastHitterSide == CourtSide.LOWER) return false
+        val hitByLocal = if (isHost) ball.lastHitterSide == CourtSide.LOWER else syncedBallLastHitterLocal
+        if (hitByLocal) return false
         val dist = hypot(ball.x - localPlayer.x, ball.y - localPlayer.y)
         return dist <= LOCAL_HIT_REACH_FT &&
             ball.z <= MAX_HIT_HEIGHT_FT &&
@@ -333,9 +384,15 @@ class OnlineMatch1v1(
     fun applyHostSnapshot(snapshot: MatchStateSnapshot) {
         if (isHost) return
 
+        val wasInactive = !ball.active && rallyPhase != RallyPhase.RALLY_LIVE
         interpBallX = mirrorX(snapshot.ballX)
         interpBallY = mirrorY(snapshot.ballY)
         interpBallZ = snapshot.ballZ
+        if (wasInactive || !snapshot.ballActive) {
+            ball.x = interpBallX
+            ball.y = interpBallY
+            ball.z = interpBallZ
+        }
         ball.active = snapshot.ballActive
 
         interpRemoteX = mirrorX(snapshot.hostX)
@@ -346,6 +403,10 @@ class OnlineMatch1v1(
         scoreLocal = snapshot.scoreGuest
         scoreRemote = snapshot.scoreHost
         servingLocal = snapshot.servingSide == "GUEST"
+        syncedRallyShotCount = snapshot.rallyShotCount
+        syncedBallBouncesOnSide = snapshot.ballBouncesOnSide
+        syncedBallLastHitterLocal = snapshot.lastHitterSide == "GUEST"
+        ball.bouncesOnCurrentSide = snapshot.ballBouncesOnSide
         rallyHits = snapshot.rallyHits
         bestRally = max(bestRally, max(snapshot.rallyShotCount, rallyHits))
         lastCallout = snapshot.lastEvent ?: ""
@@ -361,10 +422,10 @@ class OnlineMatch1v1(
             matchWinnerLocal != null -> RallyPhase.MATCH_OVER
             !snapshot.ballActive &&
                 snapshot.rallyShotCount == 0 &&
-                (eventText.contains("fault") ||
-                    eventText.contains("Out") ||
-                    eventText.contains("Net") ||
-                    eventText.contains("bounce")) -> RallyPhase.POINT_PAUSE
+                (eventText.contains("fault", ignoreCase = true) ||
+                    eventText.contains("Out!", ignoreCase = true) ||
+                    eventText.contains("Net!", ignoreCase = true) ||
+                    eventText.contains("bounce", ignoreCase = true)) -> RallyPhase.POINT_PAUSE
             !snapshot.ballActive -> RallyPhase.WAITING_SERVE
             else -> RallyPhase.RALLY_LIVE
         }
@@ -443,6 +504,12 @@ class OnlineMatch1v1(
             null -> null
         },
         publishedAtMs = System.currentTimeMillis(),
+        lastHitterSide = when (ball.lastHitterSide) {
+            CourtSide.LOWER -> "HOST"
+            CourtSide.UPPER -> "GUEST"
+            null -> null
+        },
+        ballBouncesOnSide = ball.bouncesOnCurrentSide,
     )
 
     private fun stepGuest(dt: Float) {

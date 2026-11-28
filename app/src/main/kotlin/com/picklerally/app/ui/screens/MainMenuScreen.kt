@@ -148,20 +148,26 @@ fun MainMenuScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var authLoading by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    var hasNearbyPerms by remember { mutableStateOf(nearbyHasPermissions) }
     var permissionDeniedNote by remember { mutableStateOf(false) }
+
+    LaunchedEffect(nearbyHasPermissions) {
+        hasNearbyPerms = nearbyHasPermissions
+    }
 
     val nearbyPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
         val allGranted = results.values.all { it }
+        hasNearbyPerms = allGranted
         permissionDeniedNote = !allGranted
         if (allGranted) {
             onStartNearbyDiscovery()
         }
     }
 
-    LaunchedEffect(titleTab, nearbyHasPermissions) {
-        if (titleTab == TitleModeTab.NEARBY && nearbyHasPermissions) {
+    LaunchedEffect(titleTab, hasNearbyPerms) {
+        if (titleTab == TitleModeTab.NEARBY && hasNearbyPerms) {
             onStartNearbyDiscovery()
         } else if (titleTab != TitleModeTab.NEARBY) {
             onStopNearbyDiscovery()
@@ -686,7 +692,7 @@ fun MainMenuScreen(
                         NearbyLobbyCard(
                             nearbyHosts = nearbyHosts,
                             nearbyError = nearbyError,
-                            hasPermissions = nearbyHasPermissions,
+                            hasPermissions = hasNearbyPerms,
                             permissionDenied = permissionDeniedNote,
                             onRequestPermissions = {
                                 nearbyPermissionLauncher.launch(

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -176,6 +177,10 @@ fun CourtScreen(
     nearbyIsHost: Boolean,
     nearbyRemoteChar: CharacterId,
     nearbyOpponentConnected: Boolean,
+    nearbyRoomCode: String = "",
+    nearbyRemoteName: String = "",
+    nearbyStatusMessage: String = "",
+    nearbyError: String? = null,
     onToggleMute: () -> Unit,
     onControlsHintSeen: () -> Unit,
     onOpenCharacterSelect: () -> Unit,
@@ -218,7 +223,7 @@ fun CourtScreen(
         }
     }
 
-    val onlineMatch = remember(resetNonce, matchKind, scoringMode, nearbyIsHost, playerChar, nearbyRemoteChar) {
+    val onlineMatch = remember(resetNonce, matchKind, scoringMode, nearbyIsHost, playerChar) {
         if (matchKind == CourtMatchKind.NEARBY) {
             OnlineMatch1v1(
                 isHost = nearbyIsHost,
@@ -229,6 +234,26 @@ fun CourtScreen(
             )
         } else {
             null
+        }
+    }
+
+    LaunchedEffect(onlineMatch, nearbyRemoteChar) {
+        if (onlineMatch != null) {
+            onlineMatch.remotePlayer.characterId = nearbyRemoteChar
+        }
+    }
+
+    LaunchedEffect(onlineMatch, nearbyOpponentConnected) {
+        if (onlineMatch != null && onlineMatch.isHost && nearbyOpponentConnected) {
+            nearbyManager.publishState(onlineMatch.buildSnapshot())
+        }
+    }
+
+    DisposableEffect(matchKind) {
+        onDispose {
+            if (matchKind == CourtMatchKind.NEARBY) {
+                nearbyManager.leaveSession()
+            }
         }
     }
 
@@ -266,6 +291,7 @@ fun CourtScreen(
     var swipeCurY by remember { mutableStateOf(0f) }
     var swipeStartTime by remember { mutableStateOf(0f) }
     var lastInputPushSec by remember { mutableStateOf(0f) }
+    var lastGuestAutoSwingSec by remember(resetNonce, matchKind) { mutableStateOf(-1f) }
 
     fun spawnBurst(wx: Float, wy: Float, color: Color, count: Int, speed: Float) {
         var spawned = 0
@@ -392,7 +418,7 @@ fun CourtScreen(
     }
 
     // 60 fps simulation frame loop
-    LaunchedEffect(overlayState, resetNonce, matchKind) {
+    LaunchedEffect(overlayState, resetNonce, matchKind, nearbyOpponentConnected) {
         var lastNanos = 0L
         while (true) {
             withFrameNanos { frameNanos ->
@@ -402,12 +428,24 @@ fun CourtScreen(
                 val rawDt = (frameNanos - lastNanos) / 1_000_000_000f
                 lastNanos = frameNanos
                 val dt = min(rawDt.coerceAtLeast(0f), 0.05f)
+                val nearbyWaiting = matchKind == CourtMatchKind.NEARBY && !nearbyOpponentConnected
 
-                if (overlayState == MatchOverlayState.PLAYING) {
+                if (overlayState == MatchOverlayState.PLAYING && !nearbyWaiting) {
                     elapsedSec += dt
                     if (hitstopTimer > 0f) {
                         hitstopTimer = max(0f, hitstopTimer - dt)
                     } else if (onlineMatch != null) {
+                        if (!onlineMatch.isHost &&
+                            onlineMatch.autoSwingEnabled &&
+                            onlineMatch.canLocalReachBall() &&
+                            onlineMatch.localPlayerHitState() == PlayerHitState.READY &&
+                            elapsedSec - lastGuestAutoSwingSec >= 0.45f
+                        ) {
+                            lastGuestAutoSwingSec = elapsedSec
+                            val swipeRes = onlineMatch.triggerLocalSwipe(SwipeVector(0f, 6f, 0.15f))
+                            swipeRes.guestInput?.let { nearbyManager.sendInput(it) }
+                            swipeRes.hit?.let { triggerHitEffects(it.shotType, it.hitX, it.hitY, false) }
+                        }
                         val res = onlineMatch.update(dt)
                         if (res.snapshotToPublish != null && onlineMatch.isHost) {
                             nearbyManager.publishState(res.snapshotToPublish)
@@ -482,10 +520,10 @@ fun CourtScreen(
                         ?: doublesMatch?.rules?.formattedScoreCall()
                         ?: soloMatch?.rules?.formattedScoreCall()
                         ?: "0 - 0",
-                    rallyShotCount = onlineMatch?.rules?.rallyShotCount
+                    rallyShotCount = onlineMatch?.activeRallyShotCount()
                         ?: doublesMatch?.rules?.rallyShotCount
                         ?: soloMatch?.rules?.rallyShotCount ?: 0,
-                    ballBouncesOnSide = onlineMatch?.ball?.bouncesOnCurrentSide
+                    ballBouncesOnSide = onlineMatch?.activeBallBouncesOnSide()
                         ?: doublesMatch?.ball?.bouncesOnCurrentSide
                         ?: soloMatch?.ball?.bouncesOnCurrentSide ?: 0,
                     botServeCountdownSec = if (botTimer > 0f) ceil(botTimer).toInt() else 0,
@@ -558,12 +596,12 @@ fun CourtScreen(
     val isNearby = matchKind == CourtMatchKind.NEARBY
 
     val localLabel = when {
-        isNearby -> if (nearbyIsHost) "Host" else "Guest"
+        isNearby -> playerPalette.name
         isDoubles -> "Your Team"
         else -> playerPalette.name
     }
     val remoteLabel = when {
-        isNearby -> if (nearbyIsHost) "Guest" else "Host"
+        isNearby -> nearbyRemoteName.ifBlank { opponentPalette.name }
         isDoubles -> "Opponents"
         else -> opponentPalette.name
     }
@@ -573,7 +611,21 @@ fun CourtScreen(
     val rulePhaseLabel = when {
         isNearby -> when {
             hud.hostDisconnected -> "Host disconnected"
-            !nearbyOpponentConnected && nearbyIsHost -> "Waiting for nearby player…"
+            !nearbyOpponentConnected -> if (nearbyIsHost) {
+                "Waiting for nearby player${if (nearbyRoomCode.isNotBlank()) " ($nearbyRoomCode)" else ""}…"
+            } else {
+                nearbyStatusMessage.ifBlank { "Connecting to $remoteLabel…" }
+            }
+            hud.rallyPhase == RallyPhase.POINT_PAUSE -> hud.lastCallout.ifBlank { "Next point" }
+            hud.rallyPhase == RallyPhase.WAITING_SERVE -> if (hud.servingSide == CourtSide.LOWER) {
+                "Serve diagonally · ${if (scoringMode == ScoringMode.RALLY) "Rally" else "Side-Out"} to $pointsToWin"
+            } else {
+                "$remoteLabel serving…"
+            }
+            hud.rallyShotCount == 1 ->
+                if (hud.ballBouncesOnSide == 0) "Return must bounce" else "Serve bounced · Hit return"
+            hud.rallyShotCount == 2 -> "3rd shot must bounce"
+            hud.inReach -> "In reach · Swipe!"
             else -> hud.lastShotLabel.ifBlank { "Nearby 1v1" }
         }
         hud.rallyPhase == RallyPhase.POINT_PAUSE -> hud.lastCallout.ifBlank { "Next point" }
@@ -737,9 +789,11 @@ fun CourtScreen(
                 .weight(1f)
                 .fillMaxWidth()
                 .onSizeChanged { canvasSize = it }
-                .pointerInput(resetNonce, matchKind) {
+                .pointerInput(resetNonce, matchKind, nearbyOpponentConnected) {
                     detectTapGestures { offset ->
-                        if (overlayState != MatchOverlayState.PLAYING) return@detectTapGestures
+                        if (overlayState != MatchOverlayState.PLAYING || (isNearby && !nearbyOpponentConnected)) {
+                            return@detectTapGestures
+                        }
                         val m = CourtViewportMetrics.compute(canvasSize.width.toFloat(), canvasSize.height.toFloat())
                         val (wx, wy) = m.screenToWorld(offset.x, offset.y)
                         if (wy <= CourtSpec.NET_Y + 2f) {
@@ -747,10 +801,12 @@ fun CourtScreen(
                         }
                     }
                 }
-                .pointerInput(resetNonce, matchKind) {
+                .pointerInput(resetNonce, matchKind, nearbyOpponentConnected) {
                     detectDragGestures(
                         onDragStart = { start ->
-                            if (overlayState != MatchOverlayState.PLAYING) return@detectDragGestures
+                            if (overlayState != MatchOverlayState.PLAYING || (isNearby && !nearbyOpponentConnected)) {
+                                return@detectDragGestures
+                            }
                             val m = CourtViewportMetrics.compute(canvasSize.width.toFloat(), canvasSize.height.toFloat())
                             val (wx, wy) = m.screenToWorld(start.x, start.y)
                             pointerActive = true
@@ -765,7 +821,9 @@ fun CourtScreen(
                             }
                         },
                         onDrag = { change, _ ->
-                            if (!pointerActive || overlayState != MatchOverlayState.PLAYING) return@detectDragGestures
+                            if (!pointerActive || overlayState != MatchOverlayState.PLAYING || (isNearby && !nearbyOpponentConnected)) {
+                                return@detectDragGestures
+                            }
                             val m = CourtViewportMetrics.compute(canvasSize.width.toFloat(), canvasSize.height.toFloat())
                             val (wx, wy) = m.screenToWorld(change.position.x, change.position.y)
                             swipeCurX = wx
@@ -810,7 +868,7 @@ fun CourtScreen(
                 @Suppress("UNUSED_EXPRESSION")
                 frameTicker
 
-                val serveAssign = onlineMatch?.rules?.currentServeAssignment()
+                val serveAssign = onlineMatch?.currentServeAssignment()
                     ?: doublesMatch?.rules?.currentServeAssignment()
                     ?: soloMatch?.rules?.currentServeAssignment()
                     ?: com.picklerally.app.game.ServeAssignment(
@@ -835,7 +893,7 @@ fun CourtScreen(
                 }
                 val ball = onlineMatch?.ball ?: doublesMatch?.ball ?: soloMatch?.ball ?: com.picklerally.app.game.BallState()
                 val hitState = when {
-                    onlineMatch != null -> PlayerHitState.NONE
+                    onlineMatch != null -> onlineMatch.localPlayerHitState()
                     doublesMatch != null -> doublesMatch.playerHitState()
                     soloMatch != null -> soloMatch.playerHitState()
                     else -> PlayerHitState.NONE
@@ -847,7 +905,7 @@ fun CourtScreen(
                     CourtRenderScene(
                         rallyPhase = hud.rallyPhase,
                         serveAssignment = serveAssign,
-                        mirrorServeHighlight = onlineMatch != null && !onlineMatch.isHost,
+                        mirrorServeHighlight = false,
                         lastFaultReason = onlineMatch?.lastFaultReason
                             ?: doublesMatch?.lastFaultReason
                             ?: soloMatch?.lastFaultReason,
@@ -923,6 +981,100 @@ fun CourtScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary,
                         )
+                    }
+                }
+            }
+
+            // Nearby Waiting / Connecting / Error Overlay
+            if (isNearby && !nearbyOpponentConnected && overlayState == MatchOverlayState.PLAYING) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(NavyDeep.copy(alpha = 0.84f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Surface(
+                        modifier = Modifier.widthIn(max = 300.dp).fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        color = NavyCard,
+                        border = BorderStroke(1.dp, BorderSlate),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (nearbyError != null) {
+                                Icon(
+                                    imageVector = Icons.Filled.Wifi,
+                                    contentDescription = null,
+                                    tint = RoseFault,
+                                    modifier = Modifier.size(32.dp),
+                                )
+                            } else {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(32.dp),
+                                    color = LimeAccent,
+                                    strokeWidth = 3.dp,
+                                )
+                            }
+
+                            Text(
+                                text = when {
+                                    nearbyError != null -> "Nearby Connection Issue"
+                                    nearbyIsHost -> "Waiting for Nearby Opponent"
+                                    else -> "Connecting Nearby…"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary,
+                                textAlign = TextAlign.Center,
+                            )
+
+                            if (nearbyIsHost && nearbyRoomCode.isNotBlank() && nearbyError == null) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = NavyDeep,
+                                    border = BorderStroke(1.dp, LimeAccent.copy(alpha = 0.45f)),
+                                ) {
+                                    Text(
+                                        text = "Court Code: $nearbyRoomCode",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = LimeAccent,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = nearbyError ?: nearbyStatusMessage.ifBlank {
+                                    if (nearbyIsHost) {
+                                        "Ask your nearby friend to open Nearby and tap your court to join."
+                                    } else {
+                                        "Handshaking with ${remoteLabel}'s device…"
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (nearbyError != null) RoseFault else TextSecondary,
+                                textAlign = TextAlign.Center,
+                            )
+
+                            OutlinedButton(
+                                onClick = ::leaveCourt,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("nearby_cancel_button"),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, BorderSlate),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                            ) {
+                                Text(
+                                    text = "Cancel & Back to Lobby",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1201,7 +1353,8 @@ fun CourtScreen(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                val canLocalServe = hud.rallyPhase == RallyPhase.WAITING_SERVE &&
+                val canLocalServe = (!isNearby || nearbyOpponentConnected) &&
+                    hud.rallyPhase == RallyPhase.WAITING_SERVE &&
                     hud.servingSide == CourtSide.LOWER &&
                     (!isDoubles || hud.serverIndexInTeam == 0)
 

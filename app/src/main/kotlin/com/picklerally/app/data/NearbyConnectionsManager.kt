@@ -55,6 +55,7 @@ data class NearbySessionState(
     val roomCode: String = "",
     val localChar: CharacterId = CharacterId.RIO,
     val remoteChar: CharacterId = CharacterId.LOLA,
+    val remoteName: String = "",
     val connectedEndpointId: String? = null,
     val opponentConnected: Boolean = false,
     val statusMessage: String = "",
@@ -110,6 +111,9 @@ class NearbyConnectionsManager(private val context: Context) {
     var onRemoteCharacterReceived: ((CharacterId) -> Unit)? = null
 
     private var activeEndpointId: String? = null
+    private var pendingEndpointId: String? = null
+    private var isAdvertising = false
+    private var discoveryRequested = false
     private var lastSnapshotPushMs: Long = 0L
 
     fun hasAllPermissions(): Boolean {
@@ -120,9 +124,11 @@ class NearbyConnectionsManager(private val context: Context) {
 
     fun startDiscovery() {
         if (!hasAllPermissions()) return
-        if (_isDiscovering.value) return
+        if (_session.value.isActive) return
+        if (discoveryRequested || _isDiscovering.value) return
         _errorMessage.value = null
         _discoveredHosts.value = emptyList()
+        discoveryRequested = true
 
         val options = DiscoveryOptions.Builder()
             .setStrategy(Strategy.P2P_POINT_TO_POINT)
@@ -130,18 +136,30 @@ class NearbyConnectionsManager(private val context: Context) {
 
         client.startDiscovery(SERVICE_ID, discoveryCallback, options)
             .addOnSuccessListener {
-                _isDiscovering.value = true
+                if (discoveryRequested) {
+                    _isDiscovering.value = true
+                } else {
+                    try {
+                        client.stopDiscovery()
+                    } catch (_: Exception) {
+                    }
+                }
             }
             .addOnFailureListener { err ->
                 Log.w(TAG, "Nearby discovery failed: ${err.message}")
+                discoveryRequested = false
                 _isDiscovering.value = false
                 _errorMessage.value = err.localizedMessage ?: "Nearby search unavailable on this device."
             }
     }
 
     fun stopDiscovery() {
+        discoveryRequested = false
         if (_isDiscovering.value) {
-            client.stopDiscovery()
+            try {
+                client.stopDiscovery()
+            } catch (_: Exception) {
+            }
             _isDiscovering.value = false
         }
         _discoveredHosts.value = emptyList()
@@ -152,7 +170,15 @@ class NearbyConnectionsManager(private val context: Context) {
             _errorMessage.value = "Grant Nearby permissions to host."
             return
         }
-        leaveSession()
+        stopDiscovery()
+        disconnectActiveOnly()
+        if (isAdvertising) {
+            try {
+                client.stopAdvertising()
+            } catch (_: Exception) {
+            }
+            isAdvertising = false
+        }
         _errorMessage.value = null
 
         val code = RoomCodeGenerator.generate()
@@ -164,6 +190,7 @@ class NearbyConnectionsManager(private val context: Context) {
             roomCode = code,
             localChar = hostCharacter,
             remoteChar = if (hostCharacter == CharacterId.LOLA) CharacterId.RIO else CharacterId.LOLA,
+            remoteName = "",
             opponentConnected = false,
             statusMessage = "Waiting for nearby player ($code)…",
         )
@@ -173,10 +200,18 @@ class NearbyConnectionsManager(private val context: Context) {
             .build()
 
         client.startAdvertising(endpointName, SERVICE_ID, connectionLifecycleCallback, options)
+            .addOnSuccessListener {
+                isAdvertising = true
+            }
             .addOnFailureListener { err ->
                 Log.w(TAG, "Nearby advertising failed: ${err.message}")
+                isAdvertising = false
                 _errorMessage.value = err.localizedMessage ?: "Could not start Nearby host."
-                _session.value = NearbySessionState()
+                _session.value = _session.value.copy(
+                    isActive = false,
+                    opponentConnected = false,
+                    statusMessage = "Host failed to start",
+                )
             }
     }
 
@@ -185,19 +220,29 @@ class NearbyConnectionsManager(private val context: Context) {
             _errorMessage.value = "Grant Nearby permissions to join."
             return
         }
+        // Keep Play Services endpoint table intact: only stop discovery and any prior peer, NOT stopAllEndpoints()!
         stopDiscovery()
-        leaveSession()
+        disconnectActiveOnly()
+        if (isAdvertising) {
+            try {
+                client.stopAdvertising()
+            } catch (_: Exception) {
+            }
+            isAdvertising = false
+        }
         _errorMessage.value = null
 
         val palette = characterPalette(localCharacter)
+        pendingEndpointId = host.endpointId
         _session.value = NearbySessionState(
             isActive = true,
             isHost = false,
             roomCode = host.roomCode,
             localChar = localCharacter,
             remoteChar = host.characterId,
+            remoteName = host.hostName,
             opponentConnected = false,
-            statusMessage = "Connecting to ${host.hostName}…",
+            statusMessage = "Connecting to ${host.hostName} (${host.roomCode})…",
         )
 
         client.requestConnection(
@@ -206,8 +251,14 @@ class NearbyConnectionsManager(private val context: Context) {
             connectionLifecycleCallback,
         ).addOnFailureListener { err ->
             Log.w(TAG, "Nearby connection request failed: ${err.message}")
-            _errorMessage.value = err.localizedMessage ?: "Failed to connect to host."
-            _session.value = NearbySessionState()
+            pendingEndpointId = null
+            val msg = err.localizedMessage ?: "Failed to connect to ${host.hostName}."
+            _errorMessage.value = msg
+            _session.value = _session.value.copy(
+                isActive = false,
+                opponentConnected = false,
+                statusMessage = msg,
+            )
         }
     }
 
@@ -228,12 +279,33 @@ class NearbyConnectionsManager(private val context: Context) {
             sendPacket(NearbyWirePacket(type = "meta", status = RoomStatus.HOST_LEFT.name))
         }
         activeEndpointId = null
+        pendingEndpointId = null
+        isAdvertising = false
         try {
             client.stopAdvertising()
             client.stopAllEndpoints()
         } catch (_: Exception) {
         }
         _session.value = NearbySessionState()
+    }
+
+    private fun disconnectActiveOnly() {
+        val prevActive = activeEndpointId
+        val prevPending = pendingEndpointId
+        activeEndpointId = null
+        pendingEndpointId = null
+        if (prevActive != null) {
+            try {
+                client.disconnectFromEndpoint(prevActive)
+            } catch (_: Exception) {
+            }
+        }
+        if (prevPending != null && prevPending != prevActive) {
+            try {
+                client.disconnectFromEndpoint(prevPending)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun sendPacket(packet: NearbyWirePacket) {
@@ -266,17 +338,43 @@ class NearbyConnectionsManager(private val context: Context) {
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
+            val current = _session.value
+            if (!current.isActive) {
+                client.rejectConnection(endpointId)
+                return
+            }
+            if (activeEndpointId != null && activeEndpointId != endpointId) {
+                client.rejectConnection(endpointId)
+                return
+            }
+            pendingEndpointId = endpointId
+            val parts = connectionInfo.endpointName.split("|")
+            val peerName = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+            val peerChar = parts.getOrNull(1)?.let { CharacterId.fromStringOrDefault(it, current.remoteChar) }
+            _session.value = current.copy(
+                remoteChar = peerChar ?: current.remoteChar,
+                remoteName = peerName ?: current.remoteName,
+                statusMessage = "Accepting ${peerName ?: "opponent"}…",
+            )
+            peerChar?.let { onRemoteCharacterReceived?.invoke(it) }
             client.acceptConnection(endpointId, payloadCallback)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            if (pendingEndpointId == endpointId) {
+                pendingEndpointId = null
+            }
             if (result.status.isSuccess) {
                 activeEndpointId = endpointId
-                try {
-                    client.stopAdvertising()
-                } catch (_: Exception) {
+                if (isAdvertising) {
+                    try {
+                        client.stopAdvertising()
+                    } catch (_: Exception) {
+                    }
+                    isAdvertising = false
                 }
                 val current = _session.value
+                _errorMessage.value = null
                 _session.value = current.copy(
                     connectedEndpointId = endpointId,
                     opponentConnected = true,
@@ -289,14 +387,21 @@ class NearbyConnectionsManager(private val context: Context) {
                     ),
                 )
             } else {
-                _errorMessage.value = "Nearby connection rejected (${result.status.statusCode})."
-                _session.value = NearbySessionState()
+                val msg = "Nearby connection failed (code ${result.status.statusCode})."
+                _errorMessage.value = msg
+                _session.value = _session.value.copy(
+                    isActive = false,
+                    connectedEndpointId = null,
+                    opponentConnected = false,
+                    statusMessage = msg,
+                )
             }
         }
 
         override fun onDisconnected(endpointId: String) {
-            if (activeEndpointId == endpointId) {
+            if (activeEndpointId == endpointId || pendingEndpointId == endpointId) {
                 activeEndpointId = null
+                pendingEndpointId = null
                 val current = _session.value
                 _session.value = current.copy(
                     connectedEndpointId = null,
@@ -321,8 +426,11 @@ class NearbyConnectionsManager(private val context: Context) {
             }
             when (packet.type) {
                 "hello" -> {
-                    val remoteChar = CharacterId.fromStringOrDefault(packet.charId, CharacterId.LOLA)
-                    _session.value = _session.value.copy(remoteChar = remoteChar)
+                    val remoteChar = CharacterId.fromStringOrDefault(packet.charId, _session.value.remoteChar)
+                    _session.value = _session.value.copy(
+                        remoteChar = remoteChar,
+                        remoteName = characterPalette(remoteChar).name,
+                    )
                     onRemoteCharacterReceived?.invoke(remoteChar)
                 }
                 "input" -> packet.input?.let { onRemoteInput?.invoke(it) }

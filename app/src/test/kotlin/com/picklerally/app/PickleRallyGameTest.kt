@@ -14,6 +14,7 @@ import com.picklerally.app.game.MatchStateSnapshot
 import com.picklerally.app.game.MatchValidator
 import com.picklerally.app.game.NetCrossOutcome
 import com.picklerally.app.game.OnlineMatch1v1
+import com.picklerally.app.game.PlayerHitState
 import com.picklerally.app.game.PlayerInputSnapshot
 import com.picklerally.app.game.RallyPhase
 import com.picklerally.app.game.RulesEngine
@@ -218,6 +219,36 @@ class PickleRallyGameTest {
         assertEquals(RallyPhase.RALLY_LIVE, guest.rallyPhase)
         assertEquals(snapshot.scoreGuest, guest.scoreLocal)
         assertEquals(snapshot.scoreHost, guest.scoreRemote)
+        assertEquals(1, guest.activeRallyShotCount())
+        assertEquals(0, guest.activeBallBouncesOnSide())
+
+        // Guest serve assignment when Host is serving at 0-0: target box is Guest's RIGHT box
+        val preServeGuest = OnlineMatch1v1(isHost = false, localUid = "guest_uid")
+        val initialSnap = host.let { OnlineMatch1v1(isHost = true, localUid = "h").buildSnapshot() }
+        preServeGuest.applyHostSnapshot(initialSnap)
+        val guestServeAssign = preServeGuest.currentServeAssignment()
+        assertEquals(CourtSide.UPPER, guestServeAssign.servingSide)
+        assertEquals(CourtSide.LOWER, guestServeAssign.targetCourtSide)
+        assertEquals(ServiceBoxSide.RIGHT, guestServeAssign.targetBox)
+
+        // When ball reaches Guest after 1 bounce, Guest can hit and hitState is READY
+        val reachableSnap = decodedSnap.copy(
+            ballX = OnlineMatch1v1.mirrorX(guest.localPlayer.targetX),
+            ballY = OnlineMatch1v1.mirrorY(guest.localPlayer.targetY),
+            ballZ = 2.0f,
+            ballActive = true,
+            lastHitterSide = "HOST",
+            ballBouncesOnSide = 1,
+            rallyShotCount = 1,
+        )
+        guest.applyHostSnapshot(reachableSnap)
+        repeat(25) { guest.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        assertTrue(guest.canLocalReachBall())
+        assertEquals(PlayerHitState.READY, guest.localPlayerHitState())
+
+        // Before bounce on serve (shot 1), Guest hitState reports WAIT_BOUNCE
+        guest.applyHostSnapshot(reachableSnap.copy(ballBouncesOnSide = 0, rallyShotCount = 1))
+        assertEquals(PlayerHitState.WAIT_BOUNCE, guest.localPlayerHitState())
     }
 
     @Test

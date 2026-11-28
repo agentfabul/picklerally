@@ -17,6 +17,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -100,6 +103,18 @@ private fun PickleRallyApp() {
     var bestOf by remember { mutableIntStateOf(1) }
     var difficulty by remember { mutableStateOf(BotDifficulty.NORMAL) }
     var activeCourtKind by remember { mutableStateOf(CourtMatchKind.SOLO) }
+    var nearbyHasPerms by remember { mutableStateOf(nearbyManager.hasAllPermissions()) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, nearbyManager) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                nearbyHasPerms = nearbyManager.hasAllPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(prefs.muted) {
         soundFx.isMuted = prefs.muted
@@ -149,7 +164,7 @@ private fun PickleRallyApp() {
                     authUser = authUser,
                     nearbyHosts = nearbyHosts,
                     nearbyError = nearbyError,
-                    nearbyHasPermissions = nearbyManager.hasAllPermissions(),
+                    nearbyHasPermissions = nearbyHasPerms,
                     onSelectTitleTab = {
                         soundFx.playMenuClick()
                         titleTab = it
@@ -301,6 +316,10 @@ private fun PickleRallyApp() {
                     nearbyIsHost = nearbySession.isHost,
                     nearbyRemoteChar = nearbySession.remoteChar,
                     nearbyOpponentConnected = nearbySession.opponentConnected,
+                    nearbyRoomCode = nearbySession.roomCode,
+                    nearbyRemoteName = nearbySession.remoteName,
+                    nearbyStatusMessage = nearbySession.statusMessage,
+                    nearbyError = nearbyError,
                     onToggleMute = {
                         scope.launch { localPrefs.setMuted(!prefs.muted) }
                     },
