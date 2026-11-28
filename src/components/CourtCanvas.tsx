@@ -315,7 +315,15 @@ export function CourtCanvas({
     const getViewportMetrics = () => {
       const cw = canvas.width;
       const ch = canvas.height;
-      const worldAspect = CourtSpec.WORLD_WIDTH_FT / CourtSpec.WORLD_HEIGHT_FT;
+      // Crop the unused border around the court (players never go this far out), so the
+      // court fills much more of a phone screen (e.g. iPhone 11-14).
+      const VIEW_X0 = 2.5;
+      const VIEW_X1 = CourtSpec.WORLD_WIDTH_FT - 2.5;
+      const VIEW_Y0 = 2.5;
+      const VIEW_Y1 = CourtSpec.WORLD_HEIGHT_FT - 2.5;
+      const viewW = VIEW_X1 - VIEW_X0;
+      const viewH = VIEW_Y1 - VIEW_Y0;
+      const worldAspect = viewW / viewH;
       const screenAspect = cw / ch;
 
       let drawW = cw;
@@ -331,7 +339,10 @@ export function CourtCanvas({
         offsetY = (ch - drawH) / 2;
       }
 
-      const scale = drawW / CourtSpec.WORLD_WIDTH_FT;
+      const scale = drawW / viewW;
+      // Shift so the cropped view window (not the full world) fills the canvas.
+      offsetX -= VIEW_X0 * scale;
+      offsetY -= (CourtSpec.WORLD_HEIGHT_FT - VIEW_Y1) * scale;
       return { cw, ch, drawW, drawH, offsetX, offsetY, scale };
     };
 
