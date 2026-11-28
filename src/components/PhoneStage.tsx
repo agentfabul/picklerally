@@ -401,7 +401,7 @@ export function PhoneStage() {
       savedMatchGuardRef.current = false;
       setMatchSaveState('IDLE');
       const session = local
-        ? await OnlineRoomSession.createLocalRoom(bridgeCallbacks, playerChar)
+        ? await OnlineRoomSession.createLocalRoom(bridgeCallbacks, playerChar, playerDisplayName)
         : await OnlineRoomSession.createRoom(bridgeCallbacks, playerChar);
       setOnlineSession(session);
       setOpponentConnected(false);
@@ -429,7 +429,7 @@ export function PhoneStage() {
       savedMatchGuardRef.current = false;
       setMatchSaveState('IDLE');
       const session = local
-        ? await OnlineRoomSession.joinLocalRoom(normalized, bridgeCallbacks, playerChar)
+        ? await OnlineRoomSession.joinLocalRoom(normalized, bridgeCallbacks, playerChar, playerDisplayName)
         : await OnlineRoomSession.joinRoom(normalized, bridgeCallbacks, playerChar);
       setOnlineSession(session);
       setOpponentConnected(true);
@@ -513,9 +513,9 @@ export function PhoneStage() {
   const opponentPalette = CHARACTER_PALETTES[opponentChar];
 
   const localLabel = hasNetworkSession
-    ? onlineSession.room.isHost
+    ? playerDisplayName || (onlineSession.room.isHost
       ? 'Host'
-      : 'Guest'
+      : 'Guest')
     : isDoubles
       ? 'Your Team'
       : playerDisplayName || playerPalette.name;
@@ -523,9 +523,9 @@ export function PhoneStage() {
   const scoreLocalLabel = isDoubles && !hasNetworkSession ? 'Us' : null;
   const scoreRemoteLabel = isDoubles && !hasNetworkSession ? 'Them' : null;
   const remoteLabel = hasNetworkSession
-    ? onlineSession.room.isHost
+    ? onlineSession.room.opponentName || (onlineSession.room.isHost
       ? 'Guest'
-      : 'Host'
+      : 'Host')
     : isDoubles
       ? 'Opponents'
       : opponentPalette.name;
