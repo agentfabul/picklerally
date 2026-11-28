@@ -63,7 +63,7 @@ type GameState =
 type TitleTab = 'SOLO' | 'DOUBLES' | 'ONLINE' | 'NEARBY';
 
 /** Online 1v1 is paused for now; the tab shows a "coming soon" note. Set true to bring it back. */
-const ONLINE_ENABLED = false;
+const ONLINE_ENABLED = true;
 
 const ROSTER_ORDER: CharacterId[] = [
   'RIO',
