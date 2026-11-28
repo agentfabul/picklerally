@@ -738,7 +738,7 @@ export function PhoneStage() {
                           <span className="shrink-0 text-[10px] font-normal text-lime-300">✎</span>
                           <span className="shrink-0 text-[10px] font-normal text-slate-400">· {playerPalette.name}</span>
                         </button>
-                      )}                playerName={playerDisplayName || undefined}
+                      )}
 
                     </div>
                     <div className="text-[11px] text-slate-400 truncate">
@@ -1422,6 +1422,7 @@ export function PhoneStage() {
                 paused={gameState === 'PAUSED' || gameState === 'GAME_OVER'}
                 onlineSession={onlineSession}
                 simulatedGuestActive={simGuestActive}
+                playerName={playerDisplayName || undefined}
                 onHudChange={handleHudChange}
               />
 
