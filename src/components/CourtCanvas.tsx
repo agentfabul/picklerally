@@ -64,6 +64,8 @@ interface CourtCanvasProps {
   paused: boolean;
   onlineSession: OnlineRoomSession | null;
   simulatedGuestActive: boolean;
+  /** Which bottom corner the touch joystick sits in. */
+  dominantHand?: 'RIGHT' | 'LEFT';
   playerName?: string;
   opponentName?: string;
   onHudChange: (hud: HudSnapshot) => void;
@@ -83,11 +85,36 @@ export function CourtCanvas({
   onlineSession,
   simulatedGuestActive,
   onHudChange,
+  dominantHand = 'RIGHT',
   playerName,
   opponentName,
 }: CourtCanvasProps) {
   const namesRef = useRef({ player: playerName, opponent: opponentName, room: onlineSession?.room });
   namesRef.current = { player: playerName, opponent: opponentName, room: onlineSession?.room };
+  // Touch joystick state (read every frame by the game loop).
+  const joystickRef = useRef({ dx: 0, dy: 0, active: false, release: false });
+  const knobRef = useRef<HTMLDivElement>(null);
+  const moveJoystick = (e: { currentTarget: HTMLDivElement; clientX: number; clientY: number }) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const radius = r.width / 2;
+    let dx = (e.clientX - (r.left + radius)) / radius;
+    let dy = (e.clientY - (r.top + radius)) / radius;
+    const len = Math.hypot(dx, dy);
+    if (len > 1) {
+      dx /= len;
+      dy /= len;
+    }
+    const dead = len < 0.12;
+    joystickRef.current.dx = dead ? 0 : dx;
+    joystickRef.current.dy = dead ? 0 : -dy;
+    if (knobRef.current) {
+      knobRef.current.style.transform = `translate(calc(-50% + ${dx * radius * 0.6}px), calc(-50% + ${dy * radius * 0.6}px))`;
+    }
+  };
+  const endJoystick = () => {
+    joystickRef.current = { dx: 0, dy: 0, active: false, release: true };
+    if (knobRef.current) knobRef.current.style.transform = 'translate(-50%, -50%)';
+  };
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -320,7 +347,7 @@ export function CourtCanvas({
       const VIEW_X0 = 2.5;
       const VIEW_X1 = CourtSpec.WORLD_WIDTH_FT - 2.5;
       const VIEW_Y0 = 2.5;
-      const VIEW_Y1 = CourtSpec.WORLD_HEIGHT_FT - 2.5;
+      const VIEW_Y1 = CourtSpec.WORLD_HEIGHT_FT - 1.2;
       const viewW = VIEW_X1 - VIEW_X0;
       const viewH = VIEW_Y1 - VIEW_Y0;
       const worldAspect = viewW / viewH;
@@ -845,6 +872,17 @@ export function CourtCanvas({
           pushLocalMove(baseP.x + (kdx / len) * 2.5, baseP.y + (kdy / len) * 2.5, false);
         }
 
+        // Touch joystick: push in a direction to run that way (farther = faster).
+        const joy = joystickRef.current;
+        if (joy.active && (joy.dx !== 0 || joy.dy !== 0)) {
+          const baseJ = om ? om.localPlayer : dm ? dm.player : solo.player;
+          pushLocalMove(baseJ.x + joy.dx * 2.5, baseJ.y + joy.dy * 2.5, false);
+        } else if (joy.release) {
+          joy.release = false;
+          const baseJ = om ? om.localPlayer : dm ? dm.player : solo.player;
+          pushLocalMove(baseJ.x, baseJ.y, true);
+        }
+
         // Optional simulated remote guest driver when Host tests solo in browser
         if (om && om.isHost && simGuestRef.current && !om.hostDisconnected) {
           const mirrorGuestX = OnlineMatch1v1.mirrorX(om.ball.x);
@@ -1311,6 +1349,29 @@ export function CourtCanvas({
   return (
     <div ref={containerRef} className="relative h-full w-full min-h-0 select-none touch-none">
       <canvas ref={canvasRef} className="block h-full w-full cursor-pointer" />
+      {/* Touch joystick: drag to move (farther = faster); hitting stays automatic. */}
+      <div
+        aria-label="Movement joystick"
+        className={`absolute bottom-3 z-10 h-28 w-28 touch-none select-none rounded-full border-2 border-white/25 bg-[#0B1220]/40 ${
+          dominantHand === 'LEFT' ? 'left-3' : 'right-3'
+        }`}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          joystickRef.current.active = true;
+          moveJoystick(e);
+        }}
+        onPointerMove={(e) => {
+          if (joystickRef.current.active) moveJoystick(e);
+        }}
+        onPointerUp={endJoystick}
+        onPointerCancel={endJoystick}
+      >
+        <div
+          ref={knobRef}
+          className="pointer-events-none absolute left-1/2 top-1/2 h-12 w-12 rounded-full border border-white/40 bg-lime-300/70 shadow-lg"
+          style={{ transform: 'translate(-50%, -50%)' }}
+        />
+      </div>
     </div>
   );
 }
