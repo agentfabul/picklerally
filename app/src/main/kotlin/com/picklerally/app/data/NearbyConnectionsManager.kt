@@ -44,6 +44,7 @@ data class NearbyHostInfo(
 data class NearbyWirePacket(
     val type: String,
     val charId: String? = null,
+    val playerName: String? = null,
     val input: PlayerInputSnapshot? = null,
     val snapshot: MatchStateSnapshot? = null,
     val status: String? = null,
@@ -54,6 +55,7 @@ data class NearbySessionState(
     val isHost: Boolean = false,
     val roomCode: String = "",
     val localChar: CharacterId = CharacterId.RIO,
+    val localName: String = "",
     val remoteChar: CharacterId = CharacterId.LOLA,
     val remoteName: String = "",
     val connectedEndpointId: String? = null,
@@ -109,6 +111,7 @@ class NearbyConnectionsManager(private val context: Context) {
     var onHostSnapshot: ((MatchStateSnapshot) -> Unit)? = null
     var onRoomStatusChange: ((RoomStatus) -> Unit)? = null
     var onRemoteCharacterReceived: ((CharacterId) -> Unit)? = null
+    var onRemotePeerInfoReceived: ((CharacterId, String) -> Unit)? = null
 
     private var activeEndpointId: String? = null
     private var pendingEndpointId: String? = null
@@ -165,7 +168,15 @@ class NearbyConnectionsManager(private val context: Context) {
         _discoveredHosts.value = emptyList()
     }
 
-    fun startHosting(hostCharacter: CharacterId) {
+    private fun sanitizePeerName(rawName: String, fallbackChar: CharacterId): String {
+        val cleaned = rawName.replace("|", " ").trim().take(24)
+        return cleaned.ifBlank { characterPalette(fallbackChar).name }
+    }
+
+    fun startHosting(
+        hostCharacter: CharacterId,
+        hostProfileName: String = characterPalette(hostCharacter).name,
+    ) {
         if (!hasAllPermissions()) {
             _errorMessage.value = "Grant Nearby permissions to host."
             return
@@ -182,13 +193,14 @@ class NearbyConnectionsManager(private val context: Context) {
         _errorMessage.value = null
 
         val code = RoomCodeGenerator.generate()
-        val palette = characterPalette(hostCharacter)
-        val endpointName = "${palette.name}|${hostCharacter.name}|$code"
+        val safeName = sanitizePeerName(hostProfileName, hostCharacter)
+        val endpointName = "$safeName|${hostCharacter.name}|$code"
         _session.value = NearbySessionState(
             isActive = true,
             isHost = true,
             roomCode = code,
             localChar = hostCharacter,
+            localName = safeName,
             remoteChar = if (hostCharacter == CharacterId.LOLA) CharacterId.RIO else CharacterId.LOLA,
             remoteName = "",
             opponentConnected = false,
@@ -215,7 +227,11 @@ class NearbyConnectionsManager(private val context: Context) {
             }
     }
 
-    fun joinHost(host: NearbyHostInfo, localCharacter: CharacterId) {
+    fun joinHost(
+        host: NearbyHostInfo,
+        localCharacter: CharacterId,
+        localProfileName: String = characterPalette(localCharacter).name,
+    ) {
         if (!hasAllPermissions()) {
             _errorMessage.value = "Grant Nearby permissions to join."
             return
@@ -232,13 +248,14 @@ class NearbyConnectionsManager(private val context: Context) {
         }
         _errorMessage.value = null
 
-        val palette = characterPalette(localCharacter)
+        val safeName = sanitizePeerName(localProfileName, localCharacter)
         pendingEndpointId = host.endpointId
         _session.value = NearbySessionState(
             isActive = true,
             isHost = false,
             roomCode = host.roomCode,
             localChar = localCharacter,
+            localName = safeName,
             remoteChar = host.characterId,
             remoteName = host.hostName,
             opponentConnected = false,
@@ -246,7 +263,7 @@ class NearbyConnectionsManager(private val context: Context) {
         )
 
         client.requestConnection(
-            "${palette.name}|${localCharacter.name}",
+            "$safeName|${localCharacter.name}",
             host.endpointId,
             connectionLifecycleCallback,
         ).addOnFailureListener { err ->
@@ -351,12 +368,15 @@ class NearbyConnectionsManager(private val context: Context) {
             val parts = connectionInfo.endpointName.split("|")
             val peerName = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
             val peerChar = parts.getOrNull(1)?.let { CharacterId.fromStringOrDefault(it, current.remoteChar) }
+            val resolvedChar = peerChar ?: current.remoteChar
+            val resolvedName = peerName ?: current.remoteName
             _session.value = current.copy(
-                remoteChar = peerChar ?: current.remoteChar,
-                remoteName = peerName ?: current.remoteName,
+                remoteChar = resolvedChar,
+                remoteName = resolvedName,
                 statusMessage = "Accepting ${peerName ?: "opponent"}…",
             )
             peerChar?.let { onRemoteCharacterReceived?.invoke(it) }
+            onRemotePeerInfoReceived?.invoke(resolvedChar, resolvedName)
             client.acceptConnection(endpointId, payloadCallback)
         }
 
@@ -384,6 +404,7 @@ class NearbyConnectionsManager(private val context: Context) {
                     NearbyWirePacket(
                         type = "hello",
                         charId = current.localChar.name,
+                        playerName = current.localName.ifBlank { characterPalette(current.localChar).name },
                     ),
                 )
             } else {
@@ -426,12 +447,21 @@ class NearbyConnectionsManager(private val context: Context) {
             }
             when (packet.type) {
                 "hello" -> {
-                    val remoteChar = CharacterId.fromStringOrDefault(packet.charId, _session.value.remoteChar)
-                    _session.value = _session.value.copy(
+                    val current = _session.value
+                    val remoteChar = CharacterId.fromStringOrDefault(packet.charId, current.remoteChar)
+                    val remoteName = packet.playerName
+                        ?.replace("|", " ")
+                        ?.trim()
+                        ?.take(24)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: current.remoteName.takeIf { it.isNotBlank() }
+                        ?: characterPalette(remoteChar).name
+                    _session.value = current.copy(
                         remoteChar = remoteChar,
-                        remoteName = characterPalette(remoteChar).name,
+                        remoteName = remoteName,
                     )
                     onRemoteCharacterReceived?.invoke(remoteChar)
+                    onRemotePeerInfoReceived?.invoke(remoteChar, remoteName)
                 }
                 "input" -> packet.input?.let { onRemoteInput?.invoke(it) }
                 "state" -> packet.snapshot?.let { onHostSnapshot?.invoke(it) }

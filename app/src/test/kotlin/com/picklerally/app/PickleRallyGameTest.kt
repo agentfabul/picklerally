@@ -1,5 +1,6 @@
 package com.picklerally.app
 
+import com.picklerally.app.data.NearbyWirePacket
 import com.picklerally.app.game.BallState
 import com.picklerally.app.game.BotDifficulty
 import com.picklerally.app.game.CharacterId
@@ -249,6 +250,37 @@ class PickleRallyGameTest {
         // Before bounce on serve (shot 1), Guest hitState reports WAIT_BOUNCE
         guest.applyHostSnapshot(reachableSnap.copy(ballBouncesOnSide = 0, rallyShotCount = 1))
         assertEquals(PlayerHitState.WAIT_BOUNCE, guest.localPlayerHitState())
+    }
+
+    @Test
+    fun profileNames_preserveHeroCharacterIdAndSerializeInNearbyPacket() {
+        val match = OnlineMatch1v1(
+            isHost = true,
+            localUid = "host_uid",
+            localChar = CharacterId.GUS,
+            remoteChar = CharacterId.BERT,
+            localName = "John",
+            remoteName = "Alex",
+        )
+        assertEquals(CharacterId.GUS, match.localPlayer.characterId)
+        assertEquals("Gus", match.localPlayer.characterId.displayName)
+        assertEquals("John", match.localPlayer.displayName)
+        assertEquals(CharacterId.BERT, match.remotePlayer.characterId)
+        assertEquals("Bert", match.remotePlayer.characterId.displayName)
+        assertEquals("Alex", match.remotePlayer.displayName)
+
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val packet = NearbyWirePacket(
+            type = "hello",
+            charId = CharacterId.GUS.name,
+            playerName = "John",
+        )
+        val decoded = json.decodeFromString<NearbyWirePacket>(
+            json.encodeToString(NearbyWirePacket.serializer(), packet),
+        )
+        assertEquals("hello", decoded.type)
+        assertEquals("GUS", decoded.charId)
+        assertEquals("John", decoded.playerName)
     }
 
     @Test

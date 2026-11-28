@@ -32,21 +32,27 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -118,6 +124,7 @@ fun MainMenuScreen(
     bestOf: Int,
     difficulty: BotDifficulty,
     muted: Boolean,
+    profileName: String,
     playerChar: CharacterId,
     partnerChar: CharacterId,
     opponentChar: CharacterId,
@@ -125,6 +132,7 @@ fun MainMenuScreen(
     nearbyHosts: List<NearbyHostInfo>,
     nearbyError: String?,
     nearbyHasPermissions: Boolean,
+    onSaveProfileName: (String) -> Unit,
     onSelectTitleTab: (TitleModeTab) -> Unit,
     onSelectScoringMode: (ScoringMode) -> Unit,
     onSelectPointsToWin: (Int) -> Unit,
@@ -146,6 +154,12 @@ fun MainMenuScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showProfileNameDialog by remember { mutableStateOf(false) }
+    var pendingNearbyAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val hasCustomProfileName = profileName.isNotBlank() && profileName != "Local Player"
+    var profileNameDraft by remember(profileName) {
+        mutableStateOf(if (hasCustomProfileName) profileName else "")
+    }
     var authLoading by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var hasNearbyPerms by remember { mutableStateOf(nearbyHasPermissions) }
@@ -361,15 +375,44 @@ fun MainMenuScreen(
                         ) {
                             CharacterPortrait(characterId = playerChar, size = 50.dp)
                             Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(
+                                        text = if (hasCustomProfileName) profileName else "Set Profile Name",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (hasCustomProfileName) TextPrimary else LimeAccent,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .clickable {
+                                                profileNameDraft = if (hasCustomProfileName) profileName else ""
+                                                pendingNearbyAction = null
+                                                showProfileNameDialog = true
+                                            },
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            profileNameDraft = if (hasCustomProfileName) profileName else ""
+                                            pendingNearbyAction = null
+                                            showProfileNameDialog = true
+                                        },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("edit_profile_name_button"),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Edit,
+                                            contentDescription = "Edit profile name",
+                                            tint = LimeAccent,
+                                            modifier = Modifier.size(15.dp),
+                                        )
+                                    }
+                                }
                                 Text(
-                                    text = playerPalette.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = "${playerPalette.tagline} · ${playerPalette.description}",
+                                    text = "Hero: ${playerPalette.name} · ${playerPalette.tagline}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     maxLines = 2,
@@ -690,17 +733,41 @@ fun MainMenuScreen(
 
                     TitleModeTab.NEARBY -> {
                         NearbyLobbyCard(
+                            profileName = if (hasCustomProfileName) profileName else playerPalette.name,
+                            hasCustomProfileName = hasCustomProfileName,
+                            heroName = playerPalette.name,
                             nearbyHosts = nearbyHosts,
                             nearbyError = nearbyError,
                             hasPermissions = hasNearbyPerms,
                             permissionDenied = permissionDeniedNote,
+                            onEditProfileName = {
+                                profileNameDraft = if (hasCustomProfileName) profileName else ""
+                                pendingNearbyAction = null
+                                showProfileNameDialog = true
+                            },
                             onRequestPermissions = {
                                 nearbyPermissionLauncher.launch(
                                     NearbyConnectionsManager.requiredPermissions(),
                                 )
                             },
-                            onHostNearby = onHostNearby,
-                            onJoinNearby = onJoinNearby,
+                            onHostNearby = {
+                                if (!hasCustomProfileName) {
+                                    profileNameDraft = ""
+                                    pendingNearbyAction = onHostNearby
+                                    showProfileNameDialog = true
+                                } else {
+                                    onHostNearby()
+                                }
+                            },
+                            onJoinNearby = { host ->
+                                if (!hasCustomProfileName) {
+                                    profileNameDraft = ""
+                                    pendingNearbyAction = { onJoinNearby(host) }
+                                    showProfileNameDialog = true
+                                } else {
+                                    onJoinNearby(host)
+                                }
+                            },
                         )
                     }
                 }
@@ -919,6 +986,92 @@ fun MainMenuScreen(
             }
         }
     }
+
+    if (showProfileNameDialog) {
+        val trimmedDraft = profileNameDraft.trim().take(24)
+        AlertDialog(
+            onDismissRequest = {
+                showProfileNameDialog = false
+                pendingNearbyAction = null
+            },
+            containerColor = NavySurface,
+            titleContentColor = TextPrimary,
+            textContentColor = TextSecondary,
+            title = {
+                Text(
+                    text = "Set Profile Name",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Your profile name shows on the court during matches, while your hero name (${playerPalette.name}) stays the same.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                    )
+                    OutlinedTextField(
+                        value = profileNameDraft,
+                        onValueChange = { if (it.length <= 24) profileNameDraft = it },
+                        singleLine = true,
+                        label = { Text("Profile Name") },
+                        placeholder = { Text("e.g. Alex") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_name_dialog_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = NavyDeep,
+                            unfocusedContainerColor = NavyDeep,
+                            focusedBorderColor = LimeAccent,
+                            unfocusedBorderColor = BorderSlate,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (trimmedDraft.isNotEmpty()) {
+                            onSaveProfileName(trimmedDraft)
+                        }
+                        val nextAction = pendingNearbyAction
+                        showProfileNameDialog = false
+                        pendingNearbyAction = null
+                        nextAction?.invoke()
+                    },
+                    enabled = trimmedDraft.isNotEmpty(),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("profile_name_dialog_save"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeAccent,
+                        contentColor = NavyDeep,
+                    ),
+                ) {
+                    Text(if (pendingNearbyAction != null) "Save & Play" else "Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val nextAction = pendingNearbyAction
+                        showProfileNameDialog = false
+                        pendingNearbyAction = null
+                        nextAction?.invoke()
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        text = if (pendingNearbyAction != null) "Skip" else "Cancel",
+                        color = TextSecondary,
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -1023,10 +1176,14 @@ private fun ScoringOptionButton(
 
 @Composable
 private fun NearbyLobbyCard(
+    profileName: String,
+    hasCustomProfileName: Boolean,
+    heroName: String,
     nearbyHosts: List<NearbyHostInfo>,
     nearbyError: String?,
     hasPermissions: Boolean,
     permissionDenied: Boolean,
+    onEditProfileName: () -> Unit,
     onRequestPermissions: () -> Unit,
     onHostNearby: () -> Unit,
     onJoinNearby: (NearbyHostInfo) -> Unit,
@@ -1048,6 +1205,60 @@ private fun NearbyLobbyCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted,
             )
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onEditProfileName)
+                    .testTag("nearby_edit_name_button"),
+                shape = RoundedCornerShape(10.dp),
+                color = NavyCard,
+                border = BorderStroke(
+                    1.dp,
+                    if (hasCustomProfileName) BorderSlate else LimeAccent.copy(alpha = 0.55f),
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (hasCustomProfileName) "Name: $profileName" else "Set Your Profile Name",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (hasCustomProfileName) TextPrimary else LimeAccent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "Hero: $heroName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "Edit profile name",
+                            tint = LimeAccent,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            text = if (hasCustomProfileName) "Edit" else "Set",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = LimeAccent,
+                        )
+                    }
+                }
+            }
 
             if (!hasPermissions) {
                 Button(
@@ -1147,7 +1358,7 @@ private fun NearbyLobbyCard(
                                             color = TextPrimary,
                                         )
                                         Text(
-                                            text = host.roomCode,
+                                            text = "${host.roomCode} · Hero: ${characterPalette(host.characterId).name}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = TextSecondary,
                                         )

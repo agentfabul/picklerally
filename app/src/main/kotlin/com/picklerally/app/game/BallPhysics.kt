@@ -290,6 +290,7 @@ data class PlayerEntity(
     var targetY: Float,
     var swingTimer: Float = 0f,
     var lastSwingType: ShotType = ShotType.DRIVE,
+    var displayName: String? = null,
 )
 
 data class HitFeedback(

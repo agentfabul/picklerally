@@ -144,6 +144,11 @@ private fun PickleRallyApp() {
         }
     }
 
+    val effectiveProfileName = prefs.localProfile.displayName
+        .takeIf { it.isNotBlank() && it != "Local Player" }
+        ?: authUser?.displayName?.trim()?.take(24)?.takeIf { it.isNotBlank() }
+        ?: prefs.localProfile.displayName
+
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
@@ -158,6 +163,7 @@ private fun PickleRallyApp() {
                     bestOf = bestOf,
                     difficulty = difficulty,
                     muted = prefs.muted,
+                    profileName = effectiveProfileName,
                     playerChar = prefs.selectedCharacter,
                     partnerChar = prefs.partnerCharacter,
                     opponentChar = prefs.opponentCharacter,
@@ -165,6 +171,16 @@ private fun PickleRallyApp() {
                     nearbyHosts = nearbyHosts,
                     nearbyError = nearbyError,
                     nearbyHasPermissions = nearbyHasPerms,
+                    onSaveProfileName = { newName ->
+                        soundFx.playMenuClick()
+                        scope.launch {
+                            statsRepo.updateUserDisplayName(
+                                authUser,
+                                newName,
+                                prefs.selectedCharacter,
+                            )
+                        }
+                    },
                     onSelectTitleTab = {
                         soundFx.playMenuClick()
                         titleTab = it
@@ -217,13 +233,13 @@ private fun PickleRallyApp() {
                     },
                     onHostNearby = {
                         soundFx.playEnterCourt()
-                        nearbyManager.startHosting(prefs.selectedCharacter)
+                        nearbyManager.startHosting(prefs.selectedCharacter, effectiveProfileName)
                         activeCourtKind = CourtMatchKind.NEARBY
                         navController.navigate(CourtRoute)
                     },
                     onJoinNearby = { host ->
                         soundFx.playEnterCourt()
-                        nearbyManager.joinHost(host, prefs.selectedCharacter)
+                        nearbyManager.joinHost(host, prefs.selectedCharacter, effectiveProfileName)
                         activeCourtKind = CourtMatchKind.NEARBY
                         navController.navigate(CourtRoute)
                     },
@@ -304,6 +320,7 @@ private fun PickleRallyApp() {
                     pointsToWin = pointsToWin,
                     bestOf = bestOf,
                     difficulty = difficulty,
+                    profileName = effectiveProfileName,
                     playerChar = prefs.selectedCharacter,
                     partnerChar = prefs.partnerCharacter,
                     opponentChar = prefs.opponentCharacter,

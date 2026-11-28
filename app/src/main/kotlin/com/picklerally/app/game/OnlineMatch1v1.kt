@@ -94,6 +94,8 @@ class OnlineMatch1v1(
     localChar: CharacterId = CharacterId.RIO,
     remoteChar: CharacterId = CharacterId.LOLA,
     scoringMode: ScoringMode = ScoringMode.RALLY,
+    localName: String = "",
+    remoteName: String = "",
 ) {
     companion object {
         const val PUBLISH_INTERVAL_SEC = 0.05f
@@ -107,6 +109,9 @@ class OnlineMatch1v1(
         fun mirrorY(y: Float): Float = CourtSpec.WORLD_HEIGHT_FT - y
     }
 
+    var localDisplayName: String = localName
+    var remoteDisplayName: String = remoteName
+
     val rules: RulesEngine = RulesEngine(scoringMode, MatchMode.SINGLES)
 
     val localPlayer = PlayerEntity(
@@ -116,6 +121,7 @@ class OnlineMatch1v1(
         y = CourtSpec.COURT_BOTTOM_Y - 1.1f,
         targetX = CourtSpec.COURT_CENTER_X + 4.5f,
         targetY = CourtSpec.COURT_BOTTOM_Y - 1.1f,
+        displayName = localName.takeIf { it.isNotBlank() },
     )
 
     val remotePlayer = PlayerEntity(
@@ -125,6 +131,7 @@ class OnlineMatch1v1(
         y = CourtSpec.COURT_TOP_Y + 1.1f,
         targetX = CourtSpec.COURT_CENTER_X - 4.5f,
         targetY = CourtSpec.COURT_TOP_Y + 1.1f,
+        displayName = remoteName.takeIf { it.isNotBlank() },
     )
 
     val ball = BallState(x = 14f, y = 7f, z = 2.4f)
@@ -684,8 +691,9 @@ class OnlineMatch1v1(
         localPlayer.lastSwingType = shotType
         bestRally = max(bestRally, rules.rallyShotCount)
         rallyHits = if (rules.rallyShotCount >= 3) rules.rallyShotCount else 0
-        lastShotLabel = "Host ${shotType.name}"
-        lastCallout = "Host ${shotType.name}"
+        val hostPrefix = localDisplayName.ifBlank { "Host" }
+        lastShotLabel = "$hostPrefix ${shotType.name}"
+        lastCallout = "$hostPrefix ${shotType.name}"
 
         return ShotOutcome(
             hit = HitFeedback(
@@ -739,7 +747,8 @@ class OnlineMatch1v1(
         remotePlayer.lastSwingType = shotType
         bestRally = max(bestRally, rules.rallyShotCount)
         rallyHits = if (rules.rallyShotCount >= 3) rules.rallyShotCount else 0
-        lastCallout = "Guest ${shotType.name}"
+        val guestPrefix = remoteDisplayName.ifBlank { "Guest" }
+        lastCallout = "$guestPrefix ${shotType.name}"
 
         return ShotOutcome(
             hit = HitFeedback(

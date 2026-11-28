@@ -558,6 +558,7 @@ private fun DrawScope.drawCourtPlayer(
         drawRect(Color(0xFF0F172A), Offset(pos.x + 0.12f * m.scale, eyeY - 0.1f * m.scale), Size(0.3f * m.scale, 0.2f * m.scale), style = stroke)
     }
 
+    val playerLabel = entity.displayName?.takeIf { it.isNotBlank() } ?: pal.name
     val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = LineWhite.toArgb()
         textSize = max(24f, 0.88f * m.scale)
@@ -565,7 +566,7 @@ private fun DrawScope.drawCourtPlayer(
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
     val nameY = pos.y + (if (facingUp) 2.02f else -1.48f) * m.scale
-    val nw = namePaint.measureText(pal.name) + 0.8f * m.scale
+    val nw = namePaint.measureText(playerLabel) + 0.8f * m.scale
     val nh = namePaint.textSize * 1.38f
     drawRoundRect(
         color = NavyDeep.copy(alpha = 0.82f),
@@ -574,7 +575,7 @@ private fun DrawScope.drawCourtPlayer(
         cornerRadius = CornerRadius(0.28f * m.scale, 0.28f * m.scale),
     )
     drawContext.canvas.nativeCanvas.drawText(
-        pal.name,
+        playerLabel,
         pos.x,
         nameY,
         namePaint,

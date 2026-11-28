@@ -165,6 +165,7 @@ fun CourtScreen(
     pointsToWin: Int,
     bestOf: Int,
     difficulty: BotDifficulty,
+    profileName: String = "",
     playerChar: CharacterId,
     partnerChar: CharacterId,
     opponentChar: CharacterId,
@@ -195,6 +196,8 @@ fun CourtScreen(
     var resetNonce by remember { mutableIntStateOf(0) }
     var frameTicker by remember { mutableIntStateOf(0) }
 
+    val customProfileLabel = profileName.trim().takeIf { it.isNotBlank() && it != "Local Player" }
+
     val soloMatch = remember(resetNonce, matchKind, scoringMode, pointsToWin, bestOf, difficulty, playerChar, opponentChar) {
         if (matchKind == CourtMatchKind.SOLO) {
             SinglePlayerMatch(
@@ -202,10 +205,16 @@ fun CourtScreen(
                 botChar = opponentChar,
                 scoringMode = scoringMode,
                 format = MatchFormatConfig(pointsToWin, bestOf, difficulty),
-            )
+            ).apply {
+                player.displayName = customProfileLabel
+            }
         } else {
             null
         }
+    }
+
+    LaunchedEffect(soloMatch, customProfileLabel) {
+        soloMatch?.player?.displayName = customProfileLabel
     }
 
     val doublesMatch = remember(resetNonce, matchKind, scoringMode, difficulty, playerChar, partnerChar, opponentChar) {
@@ -217,29 +226,45 @@ fun CourtScreen(
                 upperLeftChar = if (opponentChar == CharacterId.BERT) CharacterId.LOLA else CharacterId.BERT,
                 scoringMode = scoringMode,
                 difficulty = difficulty,
-            )
+            ).apply {
+                player.displayName = customProfileLabel
+            }
         } else {
             null
         }
     }
 
+    LaunchedEffect(doublesMatch, customProfileLabel) {
+        doublesMatch?.player?.displayName = customProfileLabel
+    }
+
     val onlineMatch = remember(resetNonce, matchKind, scoringMode, nearbyIsHost, playerChar) {
         if (matchKind == CourtMatchKind.NEARBY) {
+            val localDisp = customProfileLabel ?: characterPalette(playerChar).name
+            val remoteDisp = nearbyRemoteName.ifBlank { characterPalette(nearbyRemoteChar).name }
             OnlineMatch1v1(
                 isHost = nearbyIsHost,
                 localUid = if (nearbyIsHost) "nearby-host" else "nearby-guest",
                 localChar = playerChar,
                 remoteChar = nearbyRemoteChar,
                 scoringMode = scoringMode,
+                localName = localDisp,
+                remoteName = remoteDisp,
             )
         } else {
             null
         }
     }
 
-    LaunchedEffect(onlineMatch, nearbyRemoteChar) {
+    LaunchedEffect(onlineMatch, nearbyRemoteChar, nearbyRemoteName, customProfileLabel) {
         if (onlineMatch != null) {
+            val localDisp = customProfileLabel ?: characterPalette(playerChar).name
+            val remoteDisp = nearbyRemoteName.ifBlank { characterPalette(nearbyRemoteChar).name }
             onlineMatch.remotePlayer.characterId = nearbyRemoteChar
+            onlineMatch.localDisplayName = localDisp
+            onlineMatch.localPlayer.displayName = localDisp
+            onlineMatch.remoteDisplayName = remoteDisp
+            onlineMatch.remotePlayer.displayName = remoteDisp
         }
     }
 
@@ -264,12 +289,19 @@ fun CourtScreen(
             nearbyManager.onHostSnapshot = { snap -> onlineMatch.applyHostSnapshot(snap) }
             nearbyManager.onRoomStatusChange = { status -> onlineMatch.onRoomMetaUpdated(status) }
             nearbyManager.onRemoteCharacterReceived = { ch -> onlineMatch.remotePlayer.characterId = ch }
+            nearbyManager.onRemotePeerInfoReceived = { ch, name ->
+                onlineMatch.remotePlayer.characterId = ch
+                val disp = name.ifBlank { characterPalette(ch).name }
+                onlineMatch.remoteDisplayName = disp
+                onlineMatch.remotePlayer.displayName = disp
+            }
         }
         onDispose {
             nearbyManager.onRemoteInput = null
             nearbyManager.onHostSnapshot = null
             nearbyManager.onRoomStatusChange = null
             nearbyManager.onRemoteCharacterReceived = null
+            nearbyManager.onRemotePeerInfoReceived = null
         }
     }
 
@@ -596,9 +628,9 @@ fun CourtScreen(
     val isNearby = matchKind == CourtMatchKind.NEARBY
 
     val localLabel = when {
-        isNearby -> playerPalette.name
+        isNearby -> customProfileLabel ?: playerPalette.name
         isDoubles -> "Your Team"
-        else -> playerPalette.name
+        else -> customProfileLabel ?: playerPalette.name
     }
     val remoteLabel = when {
         isNearby -> nearbyRemoteName.ifBlank { opponentPalette.name }

@@ -54,6 +54,7 @@ class StatsRepository(
         }
         val docPath = "users/$uid"
         return try {
+            val localProfile = localPrefs.getLocalProfile(fallbackCharacter)
             val docRef = db.collection("users").document(uid)
             val snap = docRef.get().await()
             if (snap.exists()) {
@@ -65,11 +66,20 @@ class StatsRepository(
                     existing?.characterId,
                     fallbackCharacter,
                 )
+                val cloudName = existing?.displayName?.trim()?.takeIf { it.isNotEmpty() }
+                if (cloudName != null) {
+                    localPrefs.updateLocalDisplayName(cloudName, resolvedChar)
+                }
                 Result.success(resolvedChar)
             } else {
+                val initialName = localProfile.displayName
+                    .trim()
+                    .takeIf { it.isNotEmpty() && it != "Local Player" }
+                    ?.take(32)
+                    ?: defaultDisplayName(user)
                 val payload = mapOf(
                     "uid" to uid,
-                    "displayName" to defaultDisplayName(user),
+                    "displayName" to initialName,
                     "characterId" to fallbackCharacter.name,
                     "wins" to 0,
                     "losses" to 0,
@@ -81,6 +91,7 @@ class StatsRepository(
                     "updatedAt" to FieldValue.serverTimestamp(),
                 )
                 docRef.set(payload).await()
+                localPrefs.updateLocalDisplayName(initialName, fallbackCharacter)
                 Result.success(fallbackCharacter)
             }
         } catch (e: CancellationException) {
@@ -203,6 +214,7 @@ class StatsRepository(
                     ),
                 ).await()
             }
+            localPrefs.updateLocalDisplayName(clean, fallbackCharacter)
             Result.success(clean)
         } catch (e: CancellationException) {
             throw e
