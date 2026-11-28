@@ -402,7 +402,7 @@ export function PhoneStage() {
       setMatchSaveState('IDLE');
       const session = local
         ? await OnlineRoomSession.createLocalRoom(bridgeCallbacks, playerChar, playerDisplayName)
-        : await OnlineRoomSession.createRoom(bridgeCallbacks, playerChar);
+        : await OnlineRoomSession.createRoom(bridgeCallbacks, playerChar, playerDisplayName);
       setOnlineSession(session);
       setOpponentConnected(false);
       setSimGuestActive(false);
@@ -430,7 +430,7 @@ export function PhoneStage() {
       setMatchSaveState('IDLE');
       const session = local
         ? await OnlineRoomSession.joinLocalRoom(normalized, bridgeCallbacks, playerChar, playerDisplayName)
-        : await OnlineRoomSession.joinRoom(normalized, bridgeCallbacks, playerChar);
+        : await OnlineRoomSession.joinRoom(normalized, bridgeCallbacks, playerChar, playerDisplayName);
       setOnlineSession(session);
       setOpponentConnected(true);
       setSimGuestActive(false);
