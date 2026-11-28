@@ -331,19 +331,17 @@ export function CourtCanvas({
       let offsetX = 0;
       let offsetY = 0;
 
-      if (screenAspect > worldAspect) {
-        drawW = ch * worldAspect;
-        offsetX = (cw - drawW) / 2;
-      } else {
-        drawH = cw / worldAspect;
-        offsetY = (ch - drawH) / 2;
-      }
-
-      const scale = drawW / viewW;
-      // Shift so the cropped view window (not the full world) fills the canvas.
-      offsetX -= VIEW_X0 * scale;
-      offsetY -= (CourtSpec.WORLD_HEIGHT_FT - VIEW_Y1) * scale;
-      return { cw, ch, drawW, drawH, offsetX, offsetY, scale };
+      // Fill the width on phones by drawing the court slightly "tilted" (its length squashed by
+      // up to 1.4x), like phone tennis games. Physics and rules use world feet and are unaffected.
+      const MAX_SQUASH = 1.4;
+      const scaleY = Math.min(cw / viewW, ch / viewH);
+      const scale = screenAspect > worldAspect ? Math.min(cw / viewW, scaleY * MAX_SQUASH) : scaleY;
+      drawW = viewW * scale;
+      drawH = viewH * scaleY;
+      // Center the cropped view window (not the full world) in the canvas.
+      offsetX = (cw - drawW) / 2 - VIEW_X0 * scale;
+      offsetY = (ch - drawH) / 2 - (CourtSpec.WORLD_HEIGHT_FT - VIEW_Y1) * scaleY;
+      return { cw, ch, drawW, drawH, offsetX, offsetY, scale, scaleY };
     };
 
     const worldToScreen = (
@@ -352,7 +350,7 @@ export function CourtCanvas({
       m: ReturnType<typeof getViewportMetrics>,
     ) => ({
       sx: m.offsetX + wx * m.scale,
-      sy: m.offsetY + (CourtSpec.WORLD_HEIGHT_FT - wy) * m.scale,
+      sy: m.offsetY + (CourtSpec.WORLD_HEIGHT_FT - wy) * m.scaleY,
     });
 
     const screenToWorld = (clientX: number, clientY: number) => {
@@ -370,7 +368,7 @@ export function CourtCanvas({
         0,
         Math.min(
           CourtSpec.WORLD_HEIGHT_FT,
-          CourtSpec.WORLD_HEIGHT_FT - (py - m.offsetY) / m.scale,
+          CourtSpec.WORLD_HEIGHT_FT - (py - m.offsetY) / m.scaleY,
         ),
       );
 
@@ -1058,13 +1056,13 @@ export function CourtCanvas({
 
       const courtTopLeft = worldToScreen(CourtSpec.COURT_LEFT_X, CourtSpec.COURT_TOP_Y, m);
       const courtW = CourtSpec.COURT_WIDTH_FT * m.scale;
-      const courtH = CourtSpec.COURT_LENGTH_FT * m.scale;
+      const courtH = CourtSpec.COURT_LENGTH_FT * m.scaleY;
 
       ctx.fillStyle = CourtColors.COURT_BLUE;
       ctx.fillRect(courtTopLeft.sx, courtTopLeft.sy, courtW, courtH);
 
       const nvzTopLeft = worldToScreen(CourtSpec.COURT_LEFT_X, CourtSpec.UPPER_NVZ_Y, m);
-      const nvzH = CourtSpec.KITCHEN_DEPTH_FT * 2 * m.scale;
+      const nvzH = CourtSpec.KITCHEN_DEPTH_FT * 2 * m.scaleY;
       ctx.fillStyle = CourtColors.KITCHEN_BLUE;
       ctx.fillRect(nvzTopLeft.sx, nvzTopLeft.sy, courtW, nvzH);
 
@@ -1090,7 +1088,7 @@ export function CourtCanvas({
           boxPt.sx,
           boxPt.sy,
           (CourtSpec.COURT_WIDTH_FT / 2) * m.scale,
-          CourtSpec.SERVICE_DEPTH_FT * m.scale,
+          CourtSpec.SERVICE_DEPTH_FT * m.scaleY,
         );
       }
 
@@ -1102,7 +1100,7 @@ export function CourtCanvas({
           lowerNvzTop.sx,
           lowerNvzTop.sy,
           courtW,
-          CourtSpec.KITCHEN_DEPTH_FT * m.scale,
+          CourtSpec.KITCHEN_DEPTH_FT * m.scaleY,
         );
       }
 
@@ -1122,7 +1120,7 @@ export function CourtCanvas({
 
       const centerTop = worldToScreen(CourtSpec.COURT_CENTER_X, CourtSpec.COURT_TOP_Y, m);
       const centerLowerNvz = worldToScreen(CourtSpec.COURT_CENTER_X, CourtSpec.LOWER_NVZ_Y, m);
-      const serviceH = CourtSpec.SERVICE_DEPTH_FT * m.scale;
+      const serviceH = CourtSpec.SERVICE_DEPTH_FT * m.scaleY;
       ctx.fillRect(centerTop.sx - halfLw, centerTop.sy, lw, serviceH);
       ctx.fillRect(centerLowerNvz.sx - halfLw, centerLowerNvz.sy, lw, serviceH);
 
