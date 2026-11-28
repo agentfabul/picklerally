@@ -400,6 +400,23 @@ export function PhoneStage() {
   }, [onlineSession, opponentConnected, playerChar]);
 
   const handleCreateRoom = () => startHostRoom(false);
+  // Joystick side for touch play (Match settings → Dominant hand), saved on this device.
+  const [dominantHand, setDominantHand] = useState<'RIGHT' | 'LEFT'>(() => {
+    try {
+      return localStorage.getItem('pickleRally.dominantHand') === 'LEFT' ? 'LEFT' : 'RIGHT';
+    } catch {
+      return 'RIGHT';
+    }
+  });
+  const saveDominantHand = (h: 'RIGHT' | 'LEFT') => {
+    setDominantHand(h);
+    try {
+      localStorage.setItem('pickleRally.dominantHand', h);
+    } catch {
+      // storage unavailable (private mode)
+    }
+  };
+
   // Random-opponent matchmaking + ranking status (Online tab)
   const [rankStatus, setRankStatus] = useState<RankStatus | null>(null);
   const [searchingMatch, setSearchingMatch] = useState(false);
@@ -956,6 +973,24 @@ export function PhoneStage() {
                             Done
                           </button>
                         </div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Dominant hand (joystick side)</div>
+                        <div className="grid w-full grid-cols-2 gap-1 rounded-xl border border-white/10 bg-[#0B1220]/85 p-1">
+                          {(['LEFT', 'RIGHT'] as const).map((h) => (
+                            <button
+                              key={h}
+                              type="button"
+                              onClick={() => {
+                                soundFx.playMenuClick();
+                                saveDominantHand(h);
+                              }}
+                              className={`rounded-lg py-2 text-xs font-semibold transition-colors cursor-pointer ${
+                                dominantHand === h ? 'bg-[#1E293B] text-white' : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {h === 'LEFT' ? 'Left-handed' : 'Right-handed'}
+                            </button>
+                          ))}
+                        </div>
                         <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Scoring</div>
                         <div className="grid w-full grid-cols-2 gap-1 rounded-xl border border-white/10 bg-[#0B1220]/85 p-1">
                     <button
@@ -1497,6 +1532,7 @@ export function PhoneStage() {
                 paused={gameState === 'PAUSED' || gameState === 'GAME_OVER'}
                 onlineSession={onlineSession}
                 simulatedGuestActive={simGuestActive}
+                dominantHand={dominantHand}
                 playerName={playerDisplayName || undefined}
                 onHudChange={handleHudChange}
               />
