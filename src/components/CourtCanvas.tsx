@@ -86,8 +86,8 @@ export function CourtCanvas({
   playerName,
   opponentName,
 }: CourtCanvasProps) {
-  const namesRef = useRef({ player: playerName, opponent: opponentName });
-  namesRef.current = { player: playerName, opponent: opponentName };
+  const namesRef = useRef({ player: playerName, opponent: opponentName, room: onlineSession?.room });
+  namesRef.current = { player: playerName, opponent: opponentName, room: onlineSession?.room };
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -615,8 +615,9 @@ export function CourtCanvas({
       inReach: boolean,
       showHitRingGuide = false,
       nameOverride?: string,
+      characterOverride?: CharacterId,
     ) => {
-      const pal = CHARACTER_PALETTES[entity.characterId];
+      const pal = CHARACTER_PALETTES[characterOverride ?? entity.characterId];
       const pos = worldToScreen(entity.x, entity.y, m);
       const facingUp = entity.side === 'LOWER';
       const facingSign = facingUp ? -1 : 1;
@@ -1128,7 +1129,14 @@ export function CourtCanvas({
         drawCharacter(dm.upperTeam[1], m, false);
       } else {
         const upperChar = om ? om.remotePlayer : solo.bot;
-        drawCharacter(upperChar, m, false, false, om ? namesRef.current.opponent : undefined);
+        drawCharacter(
+          upperChar,
+          m,
+          false,
+          false,
+          om ? namesRef.current.room?.opponentName || namesRef.current.opponent : undefined,
+          om ? namesRef.current.room?.opponentCharacter : undefined,
+        );
       }
 
       const netLeft = worldToScreen(
