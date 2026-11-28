@@ -45,6 +45,13 @@ import {
 } from '../game/firebaseClient';
 import { RoomCodeGenerator } from '../game/onlineMatch1v1';
 import { OnlineRoomSession, NearbyLobby, type NearbyHostInfo } from '../game/onlineRoomService';
+import {
+  fetchRankStatus,
+  findRandomMatch,
+  watchOpponentProfile,
+  type OpponentProfile,
+  type RankStatus,
+} from '../game/matchmaking';
 import type { ScoringMode } from '../game/rulesEngine';
 import { soundFx } from '../game/soundFx';
 import { CharacterPortrait } from './CharacterPortrait';
@@ -393,6 +400,53 @@ export function PhoneStage() {
   }, [onlineSession, opponentConnected, playerChar]);
 
   const handleCreateRoom = () => startHostRoom(false);
+  // Random-opponent matchmaking + ranking status (Online tab)
+  const [rankStatus, setRankStatus] = useState<RankStatus | null>(null);
+  const [searchingMatch, setSearchingMatch] = useState(false);
+  const [opponentProfile, setOpponentProfile] = useState<OpponentProfile | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRankStatus(authUser, playerChar)
+      .then((s) => {
+        if (!cancelled) setRankStatus(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser, playerChar, gameState]);
+  useEffect(() => {
+    setOpponentProfile(null);
+    if (!onlineSession || onlineSession.room.transport !== 'RTDB') return;
+    return watchOpponentProfile(onlineSession.room.roomCode, onlineSession.room.localUid, setOpponentProfile);
+  }, [onlineSession]);
+  const startQuickMatch = async () => {
+    setRoomBusy(true);
+    setSearchingMatch(true);
+    setRoomError(null);
+    try {
+      if (onlineSession) await onlineSession.leave();
+      savedMatchGuardRef.current = false;
+      setMatchSaveState('IDLE');
+      const { session, joined } = await findRandomMatch(
+        bridgeCallbacks,
+        playerChar,
+        playerDisplayName,
+        rankStatus?.rating ?? 1000,
+      );
+      setOnlineSession(session);
+      setOpponentConnected(joined);
+      setSimGuestActive(false);
+      soundFx.playEnterCourt();
+      setGameState('PLAYING');
+    } catch (err) {
+      setRoomError(err instanceof Error ? err.message : 'Could not find a match');
+    } finally {
+      setRoomBusy(false);
+      setSearchingMatch(false);
+    }
+  };
+
   const startHostRoom = async (local: boolean) => {
     setRoomBusy(true);
     setRoomError(null);
@@ -523,7 +577,9 @@ export function PhoneStage() {
   const scoreLocalLabel = isDoubles && !hasNetworkSession ? 'Us' : null;
   const scoreRemoteLabel = isDoubles && !hasNetworkSession ? 'Them' : null;
   const remoteLabel = hasNetworkSession
-    ? onlineSession.room.opponentName || (onlineSession.room.isHost
+    ? (opponentProfile?.name
+      ? `${opponentProfile.name}${opponentProfile.rating ? ` · ${opponentProfile.rating}` : ''}`
+      : onlineSession.room.opponentName) || (onlineSession.room.isHost
       ? 'Guest'
       : 'Host')
     : isDoubles
@@ -1141,6 +1197,25 @@ export function PhoneStage() {
                       </>
                     )}
                   </div>
+
+                  <div className="flex items-center justify-between rounded-lg border border-slate-700/70 bg-[#121C30] px-2.5 py-1.5 text-[11px]">
+                    <span className="text-slate-400">Your ranking</span>
+                    <span className="font-mono font-semibold text-lime-300">
+                      {rankStatus
+                        ? `${rankStatus.rank ? `#${rankStatus.rank}` : 'Unranked'} · ${rankStatus.rating}`
+                        : '…'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={roomBusy}
+                    onClick={() => void startQuickMatch()}
+                    className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-lg border border-lime-400/60 bg-lime-400/10 text-xs font-bold text-lime-200 hover:bg-lime-400/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    <span>{searchingMatch ? 'Searching for an opponent…' : 'Find Random Opponent'}</span>
+                  </button>
+                  <div className="text-center text-[10px] text-slate-500">or play a friend with a room code</div>
 
                   <button
                     type="button"
