@@ -25,12 +25,17 @@ export interface ActiveOnlineRoom {
   isNearby: boolean;
   firestoreSynced: boolean;
   opponentConnected: boolean;
+  /** Profile name + hero shared with the other player (Nearby / Online). */
+  localName?: string;
+  localCharacter?: CharacterId;
+  opponentName?: string;
+  opponentCharacter?: CharacterId;
   status: RoomStatus;
 }
 
 type ChannelPacket =
-  | { type: 'JOIN_REQUEST'; roomCode: string; guestUid: string }
-  | { type: 'META'; roomCode: string; hostUid: string; status: RoomStatus }
+  | { type: 'JOIN_REQUEST'; roomCode: string; guestUid: string; name?: string; characterId?: CharacterId }
+  | { type: 'META'; roomCode: string; hostUid: string; status: RoomStatus; name?: string; characterId?: CharacterId }
   | { type: 'INPUT'; roomCode: string; input: PlayerInputSnapshot }
   | { type: 'STATE'; roomCode: string; snapshot: MatchStateSnapshot };
 
@@ -215,8 +220,9 @@ export class OnlineRoomSession {
   static async createLocalRoom(
     callbacks: RoomSessionCallbacks,
     characterId: CharacterId = 'RIO',
+    displayName?: string,
   ): Promise<OnlineRoomSession> {
-    void characterId;
+    const localProfile = { localName: displayName?.trim() || undefined, localCharacter: characterId };
     const session = new OnlineRoomSession({
       roomCode: RoomCodeGenerator.generate(),
       isHost: true,
@@ -227,6 +233,7 @@ export class OnlineRoomSession {
       opponentConnected: false,
       status: 'WAITING',
     });
+    Object.assign(session.room, localProfile);
     session.attachTransport(callbacks);
     return session;
   }
@@ -235,8 +242,9 @@ export class OnlineRoomSession {
     rawCode: string,
     callbacks: RoomSessionCallbacks,
     characterId: CharacterId = 'LOLA',
+    displayName?: string,
   ): Promise<OnlineRoomSession> {
-    void characterId;
+    const localProfile = { localName: displayName?.trim() || undefined, localCharacter: characterId };
     const roomCode = rawCode.trim().toUpperCase();
     if (!RoomCodeGenerator.isValid(roomCode)) {
       throw new Error('That nearby game is no longer available');
@@ -252,8 +260,9 @@ export class OnlineRoomSession {
       opponentConnected: true,
       status: 'PLAYING',
     });
+    Object.assign(session.room, localProfile);
     session.attachTransport(callbacks);
-    session.postLocalPacket({ type: 'JOIN_REQUEST', roomCode, guestUid: uid });
+    session.postLocalPacket({ type: 'JOIN_REQUEST', roomCode, guestUid: uid, name: session.room.localName, characterId });
     return session;
   }
 
@@ -308,14 +317,20 @@ export class OnlineRoomSession {
         if (msg.type === 'JOIN_REQUEST' && this.room.isHost) {
           this.room.opponentConnected = true;
           this.room.status = 'PLAYING';
+          if (msg.name) this.room.opponentName = msg.name;
+          if (msg.characterId) this.room.opponentCharacter = msg.characterId;
           callbacks.onOpponentJoined(msg.guestUid);
           this.postLocalPacket({
             type: 'META',
             roomCode: this.room.roomCode,
             hostUid: this.room.localUid,
+            name: this.room.localName,
+            characterId: this.room.localCharacter,
             status: 'PLAYING',
           });
         } else if (msg.type === 'META') {
+          if (msg.name) this.room.opponentName = msg.name;
+          if (msg.characterId) this.room.opponentCharacter = msg.characterId;
           this.room.status = msg.status;
           callbacks.onRoomStatusChange(msg.status);
         } else if (msg.type === 'INPUT' && this.room.isHost && msg.input.uid !== this.room.localUid) {
