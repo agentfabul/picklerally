@@ -64,6 +64,8 @@ interface CourtCanvasProps {
   paused: boolean;
   onlineSession: OnlineRoomSession | null;
   simulatedGuestActive: boolean;
+  playerName?: string;
+  opponentName?: string;
   onHudChange: (hud: HudSnapshot) => void;
 }
 
@@ -81,7 +83,11 @@ export function CourtCanvas({
   onlineSession,
   simulatedGuestActive,
   onHudChange,
+  playerName,
+  opponentName,
 }: CourtCanvasProps) {
+  const namesRef = useRef({ player: playerName, opponent: opponentName });
+  namesRef.current = { player: playerName, opponent: opponentName };
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -608,6 +614,7 @@ export function CourtCanvas({
       m: ReturnType<typeof getViewportMetrics>,
       inReach: boolean,
       showHitRingGuide = false,
+      nameOverride?: string,
     ) => {
       const pal = CHARACTER_PALETTES[entity.characterId];
       const pos = worldToScreen(entity.x, entity.y, m);
@@ -797,7 +804,7 @@ export function CourtCanvas({
       ctx.fillStyle = 'rgba(248, 250, 252, 0.86)';
       ctx.font = `600 ${Math.max(10, Math.round(0.68 * m.scale))}px "Plus Jakarta Sans", sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(pal.name, pos.sx, pos.sy + (facingUp ? 1.78 : -1.52) * m.scale);
+      ctx.fillText(nameOverride || pal.name, pos.sx, pos.sy + (facingUp ? 1.78 : -1.52) * m.scale);
 
       ctx.restore();
     };
@@ -1121,7 +1128,7 @@ export function CourtCanvas({
         drawCharacter(dm.upperTeam[1], m, false);
       } else {
         const upperChar = om ? om.remotePlayer : solo.bot;
-        drawCharacter(upperChar, m, false);
+        drawCharacter(upperChar, m, false, false, om ? namesRef.current.opponent : undefined);
       }
 
       const netLeft = worldToScreen(
@@ -1152,10 +1159,10 @@ export function CourtCanvas({
 
       if (dm) {
         drawCharacter(dm.partner, m, false, false);
-        drawCharacter(dm.player, m, inReach, true);
+        drawCharacter(dm.player, m, inReach, true, namesRef.current.player);
       } else {
         const lowerChar = om ? om.localPlayer : solo.player;
-        drawCharacter(lowerChar, m, inReach, true);
+        drawCharacter(lowerChar, m, inReach, true, namesRef.current.player);
       }
 
       if (pointerActive && !swipeConsumed) {
