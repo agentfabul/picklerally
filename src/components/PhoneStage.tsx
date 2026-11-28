@@ -131,6 +131,39 @@ export function PhoneStage() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [roomInput, setRoomInput] = useState('');
+  // Profile name: shown above your player and on the scoreboard. Your hero keeps its own look.
+  const [profileName, setProfileName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('pickleRally.profileName') ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [editingName, setEditingName] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('pickleRally.profileName');
+    } catch {
+      return false;
+    }
+  });
+  const [nameDraft, setNameDraft] = useState('');
+  const playerDisplayName =
+    profileName.trim() ||
+    (authUser && !authUser.isAnonymous && authUser.displayName ? authUser.displayName.split(' ')[0] : '');
+  const saveProfileName = (raw: string) => {
+    const clean = raw.replace(/\s+/g, ' ').trim().slice(0, 14);
+    if (!clean) {
+      setEditingName(false);
+      return;
+    }
+    setProfileName(clean);
+    try {
+      localStorage.setItem('pickleRally.profileName', clean);
+    } catch {
+      // storage unavailable (private mode): keep it for this session only
+    }
+    setEditingName(false);
+  };
   const [roomError, setRoomError] = useState<string | null>(null);
   const [roomBusy, setRoomBusy] = useState(false);
   const [onlineSession, setOnlineSession] = useState<OnlineRoomSession | null>(null);
@@ -356,7 +389,7 @@ export function PhoneStage() {
   useEffect(() => {
     const room = onlineSession?.room;
     if (!room || !room.isHost || room.transport !== 'LOCAL_TAB_SYNC' || opponentConnected) return;
-    return NearbyLobby.announce(room.roomCode, CHARACTER_PALETTES[playerChar].name, playerChar);
+    return NearbyLobby.announce(room.roomCode, (playerDisplayName || CHARACTER_PALETTES[playerChar].name), playerChar);
   }, [onlineSession, opponentConnected, playerChar]);
 
   const handleCreateRoom = () => startHostRoom(false);
@@ -485,7 +518,7 @@ export function PhoneStage() {
       : 'Guest'
     : isDoubles
       ? 'Your Team'
-      : playerPalette.name;
+      : playerDisplayName || playerPalette.name;
   // Short scoreboard names so the 2v2 score line fits next to the buttons.
   const scoreLocalLabel = isDoubles && !hasNetworkSession ? 'Us' : null;
   const scoreRemoteLabel = isDoubles && !hasNetworkSession ? 'Them' : null;
@@ -670,7 +703,43 @@ export function PhoneStage() {
                   <CharacterPortrait characterId={playerChar} size={46} />
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-white truncate">
-                      {playerPalette.name}
+                      {editingName ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            saveProfileName(nameDraft);
+                          }}
+                          className="flex items-center gap-1"
+                        >
+                          <input
+                            autoFocus
+                            value={nameDraft}
+                            maxLength={14}
+                            onChange={(e) => setNameDraft(e.target.value)}
+                            onBlur={() => saveProfileName(nameDraft)}
+                            placeholder="Your profile name"
+                            aria-label="Profile name"
+                            className="w-32 rounded border border-slate-600 bg-[#121C30] px-1.5 py-0.5 text-xs font-semibold text-white outline-none focus:border-lime-400"
+                          />
+                        </form>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNameDraft(playerDisplayName);
+                            setEditingName(true);
+                          }}
+                          title="Tap to change your profile name"
+                          className="flex max-w-full cursor-pointer items-center gap-1 text-left"
+                        >
+                          <span className={`truncate ${playerDisplayName ? '' : 'text-lime-300'}`}>
+                            {playerDisplayName || 'Set your name'}
+                          </span>
+                          <span className="shrink-0 text-[10px] font-normal text-lime-300">✎</span>
+                          <span className="shrink-0 text-[10px] font-normal text-slate-400">· {playerPalette.name}</span>
+                        </button>
+                      )}                playerName={playerDisplayName || undefined}
+
                     </div>
                     <div className="text-[11px] text-slate-400 truncate">
                       {playerPalette.tagline} · {playerPalette.description}
