@@ -548,6 +548,15 @@ export class OnlineMatch1v1 {
       }
     }
 
+    // Auto-swing for both players (host-authoritative), so online hits register reliably.
+    for (const side of ['LOWER', 'UPPER'] as const) {
+      const auto = this.tryAutoSwingOnHost(side);
+      if (auto?.fault) {
+        return { stepEvents: noEvents, hitFeedback: null, pointResolution: auto.fault };
+      }
+      if (auto?.hit && !guestHit) guestHit = auto.hit;
+    }
+
     const stepEvents = stepBallPhysics(this.ball, dt);
     this.lastPointBounce = stepEvents.bounced;
     void this.lastPointBounce;
@@ -595,6 +604,30 @@ export class OnlineMatch1v1 {
     }
 
     return { stepEvents, hitFeedback: guestHit, pointResolution: null };
+  }
+
+  /**
+   * Auto-swing judged on the host for both players (same idea as Solo): when the ball is inside
+   * a player's reach circle on their side and the rules allow a hit right now, swing automatically.
+   * The guest gets the larger REMOTE reach to make up for network delay, so their hits register
+   * even when their own swipe would arrive too late. Manual swipes still work as before.
+   */
+  private tryAutoSwingOnHost(
+    side: 'LOWER' | 'UPPER',
+  ): { hit: HitFeedback | null; fault: PointResolution | null } | null {
+    if (this.rallyPhase !== 'RALLY_LIVE' || !this.ball.active || this.ball.lastHitterSide === side) return null;
+    const player = side === 'LOWER' ? this.localPlayer : this.remotePlayer;
+    const onOwnSide =
+      side === 'LOWER' ? this.ball.y <= CourtSpec.NET_Y + 0.8 : this.ball.y >= CourtSpec.NET_Y - 0.8;
+    if (!onOwnSide || this.ball.z > OnlineMatch1v1.MAX_HIT_HEIGHT_FT) return null;
+    const reach =
+      side === 'LOWER' ? OnlineMatch1v1.LOCAL_HIT_REACH_FT : OnlineMatch1v1.REMOTE_GENEROUS_REACH_FT;
+    const dist = Math.hypot(this.ball.x - player.x, this.ball.y - player.y);
+    if (dist > reach * 0.8) return null;
+    // Not allowed yet (two-bounce rule, kitchen volley...): wait instead of faulting.
+    if (this.rules.validatePlayerHit(side, player.x, player.y, this.ball.bouncesOnCurrentSide)) return null;
+    const swipe: SwipeVector = { dxFt: 0, dyFt: 6, durationSec: 0.15 };
+    return side === 'LOWER' ? this.handleHostSwipe(swipe) : this.handleGuestSwingOnHost(swipe);
   }
 
   private handleHostSwipe(swipe: SwipeVector): {
