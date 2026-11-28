@@ -1,0 +1,92 @@
+{
+  "project_info": {
+    "project_number": "79708452669",
+    "project_id": "gen-lang-client-0455784437",
+    "storage_bucket": "gen-lang-client-0455784437.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:79708452669:android:bb645fe45adce937aeb754",
+        "android_client_info": {
+          "package_name": "com.aistudio.picklerally.vktmpq"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "79708452669-an8uorstv25ub3v45l5f636gjkqg87si.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.picklerally.vktmpq",
+            "certificate_hash": "d7601055bd0e49f9bda79098528140fcd03a2532"
+          }
+        },
+        {
+          "client_id": "79708452669-46mgp30cddm6voukkt54c6ua83godiok.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByZLbeN-X6exH9kZ0_9rHsmTlM7-It-M8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "79708452669-46mgp30cddm6voukkt54c6ua83godiok.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:79708452669:android:98cec5ed08d491c4aeb754",
+        "android_client_info": {
+          "package_name": "com.aistudio.utangtracker.phkpvz"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "79708452669-dif84d7u5evsp71tmd6a4141qvqhgdea.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.utangtracker.phkpvz",
+            "certificate_hash": "52a401104e2258cd0e9b9d9d9aeb61b6578f6d5d"
+          }
+        },
+        {
+          "client_id": "79708452669-i8ahqe6sg5fchbi3uq7i8hu9l507kmgh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.utangtracker.phkpvz",
+            "certificate_hash": "789c626815dd7ef2fe345116f51efb6705a8ed7c"
+          }
+        },
+        {
+          "client_id": "79708452669-46mgp30cddm6voukkt54c6ua83godiok.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByZLbeN-X6exH9kZ0_9rHsmTlM7-It-M8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "79708452669-46mgp30cddm6voukkt54c6ua83godiok.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
