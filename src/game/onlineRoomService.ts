@@ -64,6 +64,7 @@ export class OnlineRoomSession {
   static async createRoom(
     callbacks: RoomSessionCallbacks,
     characterId: CharacterId = 'RIO',
+    displayName?: string,
   ): Promise<OnlineRoomSession> {
     let uid = auth.currentUser?.uid ?? `local-host-${Math.floor(1000 + Math.random() * 9000)}`;
     let firestoreSynced = false;
@@ -132,6 +133,7 @@ export class OnlineRoomSession {
         uid,
         team: 0,
         characterId,
+        ...(displayName?.trim() ? { name: displayName.trim().slice(0, 14) } : {}),
         connected: true,
       });
       await onDisconnect(ref(rtdb, `rooms/${roomCode}/players/${uid}/connected`)).set(false);
@@ -146,6 +148,7 @@ export class OnlineRoomSession {
     rawCode: string,
     callbacks: RoomSessionCallbacks,
     characterId: CharacterId = 'LOLA',
+    displayName?: string,
   ): Promise<OnlineRoomSession> {
     const roomCode = rawCode.trim().toUpperCase();
     if (!RoomCodeGenerator.isValid(roomCode)) {
@@ -206,6 +209,7 @@ export class OnlineRoomSession {
         uid,
         team: 1,
         characterId,
+        ...(displayName?.trim() ? { name: displayName.trim().slice(0, 14) } : {}),
         connected: true,
       });
       await onDisconnect(ref(rtdb, `rooms/${roomCode}/players/${uid}/connected`)).set(false);
@@ -272,6 +276,11 @@ export class OnlineRoomSession {
         const val = snap.val() as Record<string, { uid: string; connected: boolean }> | null;
         if (!val) return;
         const guest = Object.values(val).find((p) => p.uid !== this.room.localUid && p.connected);
+        if (guest) {
+          const g = guest as { name?: string; characterId?: CharacterId };
+          if (g.name) this.room.opponentName = g.name;
+          if (g.characterId) this.room.opponentCharacter = g.characterId;
+        }
         if (guest && !this.room.opponentConnected) {
           this.room.opponentConnected = true;
           this.room.status = 'PLAYING';
