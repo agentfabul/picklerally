@@ -27,8 +27,11 @@ import androidx.navigation.compose.rememberNavController
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.picklerally.app.data.AppPreferencesSnapshot
+import com.picklerally.app.data.DominantHand
 import com.picklerally.app.data.LocalPrefsStore
 import com.picklerally.app.data.NearbyConnectionsManager
+import com.picklerally.app.data.OnlineRankingSummary
+import com.picklerally.app.data.OnlineRoomManager
 import com.picklerally.app.data.StatsRepository
 import com.picklerally.app.game.BotDifficulty
 import com.picklerally.app.game.CharacterId
@@ -83,6 +86,7 @@ private fun PickleRallyApp() {
     val localPrefs = remember(context) { LocalPrefsStore(context) }
     val statsRepo = remember(context, localPrefs) { StatsRepository(context, localPrefs) }
     val nearbyManager = remember(context) { NearbyConnectionsManager(context) }
+    val onlineRoomManager = remember { OnlineRoomManager() }
     val soundFx = remember { SoundFxEngine() }
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
@@ -92,9 +96,14 @@ private fun PickleRallyApp() {
     val authUser by GoogleAuthManager.authStateFlow().collectAsStateWithLifecycle(
         initialValue = Firebase.auth.currentUser,
     )
+    val googleUser = authUser?.takeIf { !it.isAnonymous }
     val nearbyHosts by nearbyManager.discoveredHosts.collectAsStateWithLifecycle()
     val nearbySession by nearbyManager.session.collectAsStateWithLifecycle()
     val nearbyError by nearbyManager.errorMessage.collectAsStateWithLifecycle()
+    val onlineSession by onlineRoomManager.session.collectAsStateWithLifecycle()
+    val onlineError by onlineRoomManager.errorMessage.collectAsStateWithLifecycle()
+    val onlineBusy by onlineRoomManager.isBusy.collectAsStateWithLifecycle()
+    val onlineSearchingRandom by onlineRoomManager.isSearchingRandom.collectAsStateWithLifecycle()
 
     var showSplash by remember { mutableStateOf(true) }
     var titleTab by remember { mutableStateOf(TitleModeTab.SOLO) }
@@ -104,6 +113,8 @@ private fun PickleRallyApp() {
     var difficulty by remember { mutableStateOf(BotDifficulty.NORMAL) }
     var activeCourtKind by remember { mutableStateOf(CourtMatchKind.SOLO) }
     var nearbyHasPerms by remember { mutableStateOf(nearbyManager.hasAllPermissions()) }
+    var onlineRanking by remember { mutableStateOf(OnlineRankingSummary()) }
+    var rankingRefreshNonce by remember { mutableIntStateOf(0) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, nearbyManager) {
@@ -130,8 +141,12 @@ private fun PickleRallyApp() {
         )
     }
 
-    LaunchedEffect(authUser?.uid) {
-        val user = authUser ?: return@LaunchedEffect
+    androidx.compose.runtime.DisposableEffect(onlineRoomManager) {
+        onDispose { onlineRoomManager.leaveRoom() }
+    }
+
+    LaunchedEffect(googleUser?.uid) {
+        val user = googleUser ?: return@LaunchedEffect
         statsRepo.ensureUserProfile(user, prefs.selectedCharacter).onSuccess { savedChar ->
             if (savedChar != prefs.selectedCharacter) {
                 localPrefs.setSelectedCharacter(savedChar)
@@ -144,9 +159,14 @@ private fun PickleRallyApp() {
         }
     }
 
+    LaunchedEffect(googleUser?.uid, prefs.localProfile.rating, titleTab, rankingRefreshNonce) {
+        statsRepo.fetchOnlineRankingSummary(googleUser, prefs.selectedCharacter)
+            .onSuccess { onlineRanking = it }
+    }
+
     val effectiveProfileName = prefs.localProfile.displayName
         .takeIf { it.isNotBlank() && it != "Local Player" }
-        ?: authUser?.displayName?.trim()?.take(24)?.takeIf { it.isNotBlank() }
+        ?: googleUser?.displayName?.trim()?.take(24)?.takeIf { it.isNotBlank() }
         ?: prefs.localProfile.displayName
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -163,19 +183,24 @@ private fun PickleRallyApp() {
                     bestOf = bestOf,
                     difficulty = difficulty,
                     muted = prefs.muted,
+                    dominantHand = prefs.dominantHand,
                     profileName = effectiveProfileName,
                     playerChar = prefs.selectedCharacter,
                     partnerChar = prefs.partnerCharacter,
                     opponentChar = prefs.opponentCharacter,
-                    authUser = authUser,
+                    authUser = googleUser,
                     nearbyHosts = nearbyHosts,
                     nearbyError = nearbyError,
                     nearbyHasPermissions = nearbyHasPerms,
+                    onlineBusy = onlineBusy,
+                    onlineSearchingRandom = onlineSearchingRandom,
+                    onlineError = onlineError,
+                    onlineRanking = onlineRanking,
                     onSaveProfileName = { newName ->
                         soundFx.playMenuClick()
                         scope.launch {
                             statsRepo.updateUserDisplayName(
-                                authUser,
+                                googleUser,
                                 newName,
                                 prefs.selectedCharacter,
                             )
@@ -203,6 +228,10 @@ private fun PickleRallyApp() {
                     },
                     onToggleMute = {
                         scope.launch { localPrefs.setMuted(!prefs.muted) }
+                    },
+                    onSelectDominantHand = { hand ->
+                        soundFx.playMenuClick()
+                        scope.launch { localPrefs.setDominantHand(hand) }
                     },
                     onOpenStatsHub = {
                         soundFx.playMenuClick()
@@ -243,6 +272,55 @@ private fun PickleRallyApp() {
                         activeCourtKind = CourtMatchKind.NEARBY
                         navController.navigate(CourtRoute)
                     },
+                    onClearOnlineError = {
+                        onlineRoomManager.clearError()
+                    },
+                    onFindRandomOpponent = {
+                        soundFx.playMenuClick()
+                        scope.launch {
+                            val res = onlineRoomManager.findRandomOpponent(
+                                prefs.selectedCharacter,
+                                effectiveProfileName,
+                                onlineRanking.rating,
+                            )
+                            if (res.isSuccess) {
+                                soundFx.playEnterCourt()
+                                activeCourtKind = CourtMatchKind.ONLINE
+                                navController.navigate(CourtRoute)
+                            }
+                        }
+                    },
+                    onCreateOnlineRoom = {
+                        soundFx.playMenuClick()
+                        scope.launch {
+                            val res = onlineRoomManager.createRoom(
+                                prefs.selectedCharacter,
+                                effectiveProfileName,
+                                onlineRanking.rating,
+                            )
+                            if (res.isSuccess) {
+                                soundFx.playEnterCourt()
+                                activeCourtKind = CourtMatchKind.ONLINE
+                                navController.navigate(CourtRoute)
+                            }
+                        }
+                    },
+                    onJoinOnlineRoom = { rawCode ->
+                        soundFx.playMenuClick()
+                        scope.launch {
+                            val res = onlineRoomManager.joinRoom(
+                                rawCode,
+                                prefs.selectedCharacter,
+                                effectiveProfileName,
+                                onlineRanking.rating,
+                            )
+                            if (res.isSuccess) {
+                                soundFx.playEnterCourt()
+                                activeCourtKind = CourtMatchKind.ONLINE
+                                navController.navigate(CourtRoute)
+                            }
+                        }
+                    },
                 )
             }
 
@@ -256,7 +334,7 @@ private fun PickleRallyApp() {
                         if (id == CharacterId.DILL && !prefs.dillUnlocked) return@CharacterSelectScreen
                         soundFx.playMenuClick()
                         scope.launch {
-                            statsRepo.saveUserCharacter(authUser, id)
+                            statsRepo.saveUserCharacter(googleUser, id)
                             if (id == prefs.opponentCharacter) {
                                 localPrefs.setOpponentCharacter(
                                     if (id == CharacterId.LOLA) CharacterId.RIO else CharacterId.LOLA,
@@ -278,7 +356,7 @@ private fun PickleRallyApp() {
                         scope.launch {
                             localPrefs.setDillUnlocked(next)
                             if (next) {
-                                statsRepo.saveUserCharacter(authUser, CharacterId.DILL)
+                                statsRepo.saveUserCharacter(googleUser, CharacterId.DILL)
                                 if (prefs.opponentCharacter == CharacterId.DILL) {
                                     localPrefs.setOpponentCharacter(CharacterId.LOLA)
                                 }
@@ -303,7 +381,7 @@ private fun PickleRallyApp() {
 
             composable<StatsHubRoute> {
                 StatsHubScreen(
-                    authUser = authUser,
+                    authUser = googleUser,
                     playerChar = prefs.selectedCharacter,
                     repository = statsRepo,
                     onBack = {
@@ -325,8 +403,9 @@ private fun PickleRallyApp() {
                     partnerChar = prefs.partnerCharacter,
                     opponentChar = prefs.opponentCharacter,
                     muted = prefs.muted,
+                    dominantHand = prefs.dominantHand,
                     hasSeenControlsHint = prefs.hasSeenControlsHint,
-                    authUser = authUser,
+                    authUser = googleUser,
                     soundFx = soundFx,
                     statsRepository = statsRepo,
                     nearbyManager = nearbyManager,
@@ -337,8 +416,15 @@ private fun PickleRallyApp() {
                     nearbyRemoteName = nearbySession.remoteName,
                     nearbyStatusMessage = nearbySession.statusMessage,
                     nearbyError = nearbyError,
+                    onlineRoomManager = onlineRoomManager,
+                    onlineSession = onlineSession,
+                    onlineError = onlineError,
                     onToggleMute = {
                         scope.launch { localPrefs.setMuted(!prefs.muted) }
+                    },
+                    onSelectDominantHand = { hand ->
+                        soundFx.playMenuClick()
+                        scope.launch { localPrefs.setDominantHand(hand) }
                     },
                     onControlsHintSeen = {
                         scope.launch { localPrefs.markControlsHintSeen() }
@@ -348,6 +434,7 @@ private fun PickleRallyApp() {
                         navController.navigate(CharacterSelectRoute)
                     },
                     onExitToMenu = {
+                        rankingRefreshNonce += 1
                         navController.popBackStack(TitleMenuRoute, inclusive = false)
                     },
                 )

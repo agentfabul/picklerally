@@ -65,28 +65,53 @@ data class CourtViewportMetrics(
     }
 
     companion object {
-        fun compute(canvasWidth: Float, canvasHeight: Float): CourtViewportMetrics {
+        const val VIEW_MIN_X = 2.6f
+        const val VIEW_MAX_X = 25.4f
+        const val VIEW_WIDTH_FT = VIEW_MAX_X - VIEW_MIN_X
+        const val VIEW_MIN_Y = 2.4f
+        const val VIEW_MAX_Y = 53.2f
+        const val VIEW_HEIGHT_FT = VIEW_MAX_Y - VIEW_MIN_Y
+
+        fun compute(
+            canvasWidth: Float,
+            canvasHeight: Float,
+            topInsetPx: Float = 0f,
+            bottomInsetPx: Float = 0f,
+            leftInsetPx: Float = 0f,
+            rightInsetPx: Float = 0f,
+        ): CourtViewportMetrics {
             val safeW = max(1f, canvasWidth)
             val safeH = max(1f, canvasHeight)
-            val worldAspect = CourtSpec.WORLD_WIDTH_FT / CourtSpec.WORLD_HEIGHT_FT
-            val screenAspect = safeW / safeH
+            val padLeft = leftInsetPx.coerceIn(0f, safeW * 0.4f)
+            val padRight = rightInsetPx.coerceIn(0f, safeW * 0.4f)
+            val padTop = topInsetPx.coerceIn(0f, safeH * 0.4f)
+            val padBottom = bottomInsetPx.coerceIn(0f, safeH * 0.4f)
+
+            val availW = max(1f, safeW - padLeft - padRight)
+            val availH = max(1f, safeH - padTop - padBottom)
+            val viewAspect = VIEW_WIDTH_FT / VIEW_HEIGHT_FT
+            val availAspect = availW / availH
 
             val drawW: Float
             val drawH: Float
-            val offsetX: Float
-            val offsetY: Float
+            val viewLeftPx: Float
+            val viewTopPx: Float
 
-            if (screenAspect > worldAspect) {
-                drawH = safeH
-                drawW = safeH * worldAspect
-                offsetX = (safeW - drawW) / 2f
-                offsetY = 0f
+            if (availAspect > viewAspect) {
+                drawH = availH
+                drawW = availH * viewAspect
+                viewLeftPx = padLeft + (availW - drawW) / 2f
+                viewTopPx = padTop
             } else {
-                drawW = safeW
-                drawH = safeW / worldAspect
-                offsetX = 0f
-                offsetY = (safeH - drawH) / 2f
+                drawW = availW
+                drawH = availW / viewAspect
+                viewLeftPx = padLeft
+                viewTopPx = padTop + (availH - drawH) / 2f
             }
+
+            val scale = drawW / VIEW_WIDTH_FT
+            val offsetX = viewLeftPx - VIEW_MIN_X * scale
+            val offsetY = viewTopPx - (CourtSpec.WORLD_HEIGHT_FT - VIEW_MAX_Y) * scale
 
             return CourtViewportMetrics(
                 width = safeW,
@@ -95,7 +120,7 @@ data class CourtViewportMetrics(
                 drawH = drawH,
                 offsetX = offsetX,
                 offsetY = offsetY,
-                scale = drawW / CourtSpec.WORLD_WIDTH_FT,
+                scale = scale,
             )
         }
     }
@@ -134,10 +159,21 @@ data class CourtRenderScene(
     val particles: List<Particle>,
     val lastCallout: String,
     val calloutAlpha: Float,
+    val topInsetPx: Float = 0f,
+    val bottomInsetPx: Float = 0f,
+    val leftInsetPx: Float = 0f,
+    val rightInsetPx: Float = 0f,
 )
 
 fun DrawScope.drawCourtScene(scene: CourtRenderScene) {
-    val m = CourtViewportMetrics.compute(size.width, size.height)
+    val m = CourtViewportMetrics.compute(
+        canvasWidth = size.width,
+        canvasHeight = size.height,
+        topInsetPx = scene.topInsetPx,
+        bottomInsetPx = scene.bottomInsetPx,
+        leftInsetPx = scene.leftInsetPx,
+        rightInsetPx = scene.rightInsetPx,
+    )
     val dprScale = m.scale / 14f
 
     drawRect(color = CourtApron, size = size)

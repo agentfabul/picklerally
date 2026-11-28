@@ -33,8 +33,11 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
@@ -85,8 +88,10 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.credentials.CredentialManager
 import com.google.firebase.auth.FirebaseUser
 import com.picklerally.app.R
+import com.picklerally.app.data.DominantHand
 import com.picklerally.app.data.NearbyConnectionsManager
 import com.picklerally.app.data.NearbyHostInfo
+import com.picklerally.app.data.OnlineRankingSummary
 import com.picklerally.app.game.BOT_PROFILES
 import com.picklerally.app.game.BotDifficulty
 import com.picklerally.app.game.CharacterId
@@ -94,6 +99,7 @@ import com.picklerally.app.game.ScoringMode
 import com.picklerally.app.game.characterPalette
 import com.picklerally.app.ui.auth.GoogleAuthManager
 import com.picklerally.app.ui.components.CharacterPortrait
+import com.picklerally.app.ui.theme.AmberGold
 import com.picklerally.app.ui.theme.BorderSlate
 import com.picklerally.app.ui.theme.CourtApron
 import com.picklerally.app.ui.theme.LimeAccent
@@ -124,6 +130,7 @@ fun MainMenuScreen(
     bestOf: Int,
     difficulty: BotDifficulty,
     muted: Boolean,
+    dominantHand: DominantHand = DominantHand.RIGHT,
     profileName: String,
     playerChar: CharacterId,
     partnerChar: CharacterId,
@@ -132,6 +139,10 @@ fun MainMenuScreen(
     nearbyHosts: List<NearbyHostInfo>,
     nearbyError: String?,
     nearbyHasPermissions: Boolean,
+    onlineBusy: Boolean = false,
+    onlineSearchingRandom: Boolean = false,
+    onlineError: String? = null,
+    onlineRanking: OnlineRankingSummary = OnlineRankingSummary(),
     onSaveProfileName: (String) -> Unit,
     onSelectTitleTab: (TitleModeTab) -> Unit,
     onSelectScoringMode: (ScoringMode) -> Unit,
@@ -139,6 +150,7 @@ fun MainMenuScreen(
     onSelectBestOf: (Int) -> Unit,
     onSelectDifficulty: (BotDifficulty) -> Unit,
     onToggleMute: () -> Unit,
+    onSelectDominantHand: (DominantHand) -> Unit = {},
     onOpenStatsHub: () -> Unit,
     onOpenLearn: () -> Unit,
     onOpenCharacterSelect: () -> Unit,
@@ -147,6 +159,10 @@ fun MainMenuScreen(
     onStopNearbyDiscovery: () -> Unit,
     onHostNearby: () -> Unit,
     onJoinNearby: (NearbyHostInfo) -> Unit,
+    onClearOnlineError: () -> Unit = {},
+    onFindRandomOpponent: () -> Unit = {},
+    onCreateOnlineRoom: () -> Unit = {},
+    onJoinOnlineRoom: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -155,7 +171,8 @@ fun MainMenuScreen(
 
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showProfileNameDialog by remember { mutableStateOf(false) }
-    var pendingNearbyAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingLobbyAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var onlineCodeDraft by remember { mutableStateOf("") }
     val hasCustomProfileName = profileName.isNotBlank() && profileName != "Local Player"
     var profileNameDraft by remember(profileName) {
         mutableStateOf(if (hasCustomProfileName) profileName else "")
@@ -341,16 +358,21 @@ fun MainMenuScreen(
                 }
             }
 
-            // Centerpiece: Outlined Stacked PICKLE / RALLY Title + Character Card + Sign-in strip
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.SpaceBetween,
             ) {
+                // Centerpiece: Outlined Stacked PICKLE / RALLY Title + Character Card + Sign-in strip
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
                 StackedBrandTitle()
 
                 Spacer(Modifier.height(14.dp))
@@ -389,14 +411,14 @@ fun MainMenuScreen(
                                             .weight(1f, fill = false)
                                             .clickable {
                                                 profileNameDraft = if (hasCustomProfileName) profileName else ""
-                                                pendingNearbyAction = null
+                                                pendingLobbyAction = null
                                                 showProfileNameDialog = true
                                             },
                                     )
                                     IconButton(
                                         onClick = {
                                             profileNameDraft = if (hasCustomProfileName) profileName else ""
-                                            pendingNearbyAction = null
+                                            pendingLobbyAction = null
                                             showProfileNameDialog = true
                                         },
                                         modifier = Modifier
@@ -520,13 +542,13 @@ fun MainMenuScreen(
                         }
                     }
                 }
-            }
+                }
 
-            // Bottom Mode Tabs & Mode Panel
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+                // Bottom Mode Tabs & Mode Panel
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = NavyDeep.copy(alpha = 0.90f),
@@ -560,7 +582,7 @@ fun MainMenuScreen(
                         )
                         ModeTabChip(
                             label = "Online",
-                            icon = Icons.Filled.Group,
+                            icon = Icons.Filled.Public,
                             selected = titleTab == TitleModeTab.ONLINE,
                             activeTint = LimeAccent,
                             modifier = Modifier
@@ -697,38 +719,53 @@ fun MainMenuScreen(
                     }
 
                     TitleModeTab.ONLINE -> {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            color = NavyDeep.copy(alpha = 0.90f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Group,
-                                    contentDescription = null,
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(26.dp),
-                                )
-                                Text(
-                                    text = stringResource(R.string.online_coming_soon_title),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = TextPrimary,
-                                )
-                                Text(
-                                    text = stringResource(R.string.online_coming_soon_body),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                        }
+                        OnlineLobbyCard(
+                            profileName = if (hasCustomProfileName) profileName else playerPalette.name,
+                            hasCustomProfileName = hasCustomProfileName,
+                            heroName = playerPalette.name,
+                            ranking = onlineRanking,
+                            roomCodeInput = onlineCodeDraft,
+                            isBusy = onlineBusy,
+                            isSearchingRandom = onlineSearchingRandom,
+                            onlineError = onlineError,
+                            onRoomCodeChange = { next ->
+                                onlineCodeDraft = next.uppercase().take(8)
+                                if (onlineError != null) onClearOnlineError()
+                            },
+                            onEditProfileName = {
+                                profileNameDraft = if (hasCustomProfileName) profileName else ""
+                                pendingLobbyAction = null
+                                showProfileNameDialog = true
+                            },
+                            onFindRandomOpponent = {
+                                if (!hasCustomProfileName) {
+                                    profileNameDraft = ""
+                                    pendingLobbyAction = onFindRandomOpponent
+                                    showProfileNameDialog = true
+                                } else {
+                                    onFindRandomOpponent()
+                                }
+                            },
+                            onCreateOnlineRoom = {
+                                if (!hasCustomProfileName) {
+                                    profileNameDraft = ""
+                                    pendingLobbyAction = onCreateOnlineRoom
+                                    showProfileNameDialog = true
+                                } else {
+                                    onCreateOnlineRoom()
+                                }
+                            },
+                            onJoinOnlineRoom = {
+                                val targetCode = onlineCodeDraft.trim()
+                                if (!hasCustomProfileName) {
+                                    profileNameDraft = ""
+                                    pendingLobbyAction = { onJoinOnlineRoom(targetCode) }
+                                    showProfileNameDialog = true
+                                } else {
+                                    onJoinOnlineRoom(targetCode)
+                                }
+                            },
+                        )
                     }
 
                     TitleModeTab.NEARBY -> {
@@ -742,7 +779,7 @@ fun MainMenuScreen(
                             permissionDenied = permissionDeniedNote,
                             onEditProfileName = {
                                 profileNameDraft = if (hasCustomProfileName) profileName else ""
-                                pendingNearbyAction = null
+                                pendingLobbyAction = null
                                 showProfileNameDialog = true
                             },
                             onRequestPermissions = {
@@ -753,7 +790,7 @@ fun MainMenuScreen(
                             onHostNearby = {
                                 if (!hasCustomProfileName) {
                                     profileNameDraft = ""
-                                    pendingNearbyAction = onHostNearby
+                                    pendingLobbyAction = onHostNearby
                                     showProfileNameDialog = true
                                 } else {
                                     onHostNearby()
@@ -762,7 +799,7 @@ fun MainMenuScreen(
                             onJoinNearby = { host ->
                                 if (!hasCustomProfileName) {
                                     profileNameDraft = ""
-                                    pendingNearbyAction = { onJoinNearby(host) }
+                                    pendingLobbyAction = { onJoinNearby(host) }
                                     showProfileNameDialog = true
                                 } else {
                                     onJoinNearby(host)
@@ -771,6 +808,7 @@ fun MainMenuScreen(
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -982,6 +1020,42 @@ fun MainMenuScreen(
                         }
                     }
                 }
+
+                // Dominant Hand (Joystick corner)
+                Text(
+                    text = "DOMINANT HAND",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = NavyDeep,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        ScoringOptionButton(
+                            label = "Right",
+                            selected = dominantHand == DominantHand.RIGHT,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("dominant_hand_right"),
+                            onClick = { onSelectDominantHand(DominantHand.RIGHT) },
+                        )
+                        ScoringOptionButton(
+                            label = "Left",
+                            selected = dominantHand == DominantHand.LEFT,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("dominant_hand_left"),
+                            onClick = { onSelectDominantHand(DominantHand.LEFT) },
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
             }
         }
@@ -992,7 +1066,7 @@ fun MainMenuScreen(
         AlertDialog(
             onDismissRequest = {
                 showProfileNameDialog = false
-                pendingNearbyAction = null
+                pendingLobbyAction = null
             },
             containerColor = NavySurface,
             titleContentColor = TextPrimary,
@@ -1037,9 +1111,9 @@ fun MainMenuScreen(
                         if (trimmedDraft.isNotEmpty()) {
                             onSaveProfileName(trimmedDraft)
                         }
-                        val nextAction = pendingNearbyAction
+                        val nextAction = pendingLobbyAction
                         showProfileNameDialog = false
-                        pendingNearbyAction = null
+                        pendingLobbyAction = null
                         nextAction?.invoke()
                     },
                     enabled = trimmedDraft.isNotEmpty(),
@@ -1051,21 +1125,21 @@ fun MainMenuScreen(
                         contentColor = NavyDeep,
                     ),
                 ) {
-                    Text(if (pendingNearbyAction != null) "Save & Play" else "Save")
+                    Text(if (pendingLobbyAction != null) "Save & Play" else "Save")
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = {
-                        val nextAction = pendingNearbyAction
+                        val nextAction = pendingLobbyAction
                         showProfileNameDialog = false
-                        pendingNearbyAction = null
+                        pendingLobbyAction = null
                         nextAction?.invoke()
                     },
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) {
                     Text(
-                        text = if (pendingNearbyAction != null) "Skip" else "Cancel",
+                        text = if (pendingLobbyAction != null) "Skip" else "Cancel",
                         color = TextSecondary,
                     )
                 }
@@ -1385,3 +1459,248 @@ private fun NearbyLobbyCard(
         }
     }
 }
+
+@Composable
+private fun OnlineLobbyCard(
+    profileName: String,
+    hasCustomProfileName: Boolean,
+    heroName: String,
+    ranking: OnlineRankingSummary,
+    roomCodeInput: String,
+    isBusy: Boolean,
+    isSearchingRandom: Boolean,
+    onlineError: String?,
+    onRoomCodeChange: (String) -> Unit,
+    onEditProfileName: () -> Unit,
+    onFindRandomOpponent: () -> Unit,
+    onCreateOnlineRoom: () -> Unit,
+    onJoinOnlineRoom: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = NavyDeep.copy(alpha = 0.90f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("online_ranking_badge"),
+                shape = RoundedCornerShape(10.dp),
+                color = NavyCard,
+                border = BorderStroke(
+                    1.dp,
+                    if (ranking.rank != null) AmberGold.copy(alpha = 0.45f) else BorderSlate,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.EmojiEvents,
+                            contentDescription = null,
+                            tint = if (ranking.rank != null) AmberGold else LimeAccent,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = if (ranking.rank != null) {
+                                "Your ranking: #${ranking.rank} · ${ranking.rating}"
+                            } else {
+                                "Unranked · ${ranking.rating}"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TextPrimary,
+                        )
+                    }
+                    Text(
+                        text = "Cross-play",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                    )
+                }
+            }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onEditProfileName)
+                    .testTag("online_edit_name_button"),
+                shape = RoundedCornerShape(10.dp),
+                color = NavyCard,
+                border = BorderStroke(
+                    1.dp,
+                    if (hasCustomProfileName) BorderSlate else LimeAccent.copy(alpha = 0.55f),
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (hasCustomProfileName) "Name: $profileName" else "Set Your Profile Name",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (hasCustomProfileName) TextPrimary else LimeAccent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "Hero: $heroName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "Edit profile name",
+                            tint = LimeAccent,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            text = if (hasCustomProfileName) "Edit" else "Set",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = LimeAccent,
+                        )
+                    }
+                }
+            }
+
+            Button(
+                onClick = onFindRandomOpponent,
+                enabled = !isBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("online_find_random_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = LimeAccent,
+                    contentColor = NavyDeep,
+                ),
+            ) {
+                if (isSearchingRandom) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = NavyDeep,
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Searching for an opponent...", style = MaterialTheme.typography.labelLarge)
+                } else {
+                    Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Find Random Opponent", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            OutlinedButton(
+                onClick = onCreateOnlineRoom,
+                enabled = !isBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("online_create_room_button"),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, BorderSlate),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = NavyCard,
+                    contentColor = TextPrimary,
+                ),
+            ) {
+                if (isBusy && !isSearchingRandom) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = LimeAccent,
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Connecting…", style = MaterialTheme.typography.labelLarge)
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Public,
+                        contentDescription = null,
+                        tint = LimeAccent,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Create Room", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = roomCodeInput,
+                    onValueChange = onRoomCodeChange,
+                    singleLine = true,
+                    placeholder = { Text("Room code (PKL-427)") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("online_room_code_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = NavyCard,
+                        unfocusedContainerColor = NavyCard,
+                        focusedBorderColor = LimeAccent,
+                        unfocusedBorderColor = BorderSlate,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                )
+
+                Button(
+                    onClick = onJoinOnlineRoom,
+                    enabled = !isBusy && roomCodeInput.isNotBlank(),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("online_join_room_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NavyElevated,
+                        contentColor = LimeAccent,
+                    ),
+                    border = BorderStroke(1.dp, LimeAccent.copy(alpha = 0.55f)),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                ) {
+                    Text("Join Room", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            if (onlineError != null) {
+                Text(
+                    text = onlineError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RoseFault,
+                )
+            }
+        }
+    }
+}
+

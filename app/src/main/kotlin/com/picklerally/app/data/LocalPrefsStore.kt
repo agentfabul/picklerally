@@ -19,6 +19,16 @@ private val Context.pickleRallyDataStore: DataStore<Preferences> by preferencesD
     name = "pickle_rally_prefs",
 )
 
+enum class DominantHand(val label: String) {
+    RIGHT("Right"),
+    LEFT("Left");
+
+    companion object {
+        fun fromStringOrDefault(raw: String?, fallback: DominantHand = RIGHT): DominantHand =
+            entries.firstOrNull { it.name == raw } ?: fallback
+    }
+}
+
 data class AppPreferencesSnapshot(
     val selectedCharacter: CharacterId = CharacterId.RIO,
     val partnerCharacter: CharacterId = CharacterId.DILL,
@@ -26,6 +36,7 @@ data class AppPreferencesSnapshot(
     val dillUnlocked: Boolean = false,
     val muted: Boolean = false,
     val hasSeenControlsHint: Boolean = false,
+    val dominantHand: DominantHand = DominantHand.RIGHT,
     val localProfile: UserProfileStats = UserProfileStats(),
     val localHistory: List<MatchHistoryItem> = emptyList(),
 )
@@ -45,6 +56,7 @@ class LocalPrefsStore(context: Context) {
         val DILL_UNLOCKED = booleanPreferencesKey("dill_unlocked")
         val MUTED = booleanPreferencesKey("muted")
         val CONTROLS_HINT_SEEN = booleanPreferencesKey("controls_hint_seen")
+        val DOMINANT_HAND = stringPreferencesKey("dominant_hand")
         val LOCAL_PROFILE = stringPreferencesKey("local_profile_json")
         val LOCAL_HISTORY = stringPreferencesKey("local_history_json")
     }
@@ -56,6 +68,7 @@ class LocalPrefsStore(context: Context) {
         val dillUnlocked = prefs[Keys.DILL_UNLOCKED] ?: (selected == CharacterId.DILL)
         val muted = prefs[Keys.MUTED] ?: false
         val hintSeen = prefs[Keys.CONTROLS_HINT_SEEN] ?: false
+        val dominantHand = DominantHand.fromStringOrDefault(prefs[Keys.DOMINANT_HAND], DominantHand.RIGHT)
         val profile = decodeProfile(prefs[Keys.LOCAL_PROFILE], selected)
         val history = decodeHistory(prefs[Keys.LOCAL_HISTORY])
 
@@ -66,6 +79,7 @@ class LocalPrefsStore(context: Context) {
             dillUnlocked = dillUnlocked,
             muted = muted,
             hasSeenControlsHint = hintSeen,
+            dominantHand = dominantHand,
             localProfile = profile,
             localHistory = history,
         )
@@ -117,6 +131,12 @@ class LocalPrefsStore(context: Context) {
     suspend fun markControlsHintSeen() {
         dataStore.edit { prefs ->
             prefs[Keys.CONTROLS_HINT_SEEN] = true
+        }
+    }
+
+    suspend fun setDominantHand(hand: DominantHand) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DOMINANT_HAND] = hand.name
         }
     }
 

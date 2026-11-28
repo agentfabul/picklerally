@@ -100,9 +100,9 @@ class OnlineMatch1v1(
     companion object {
         const val PUBLISH_INTERVAL_SEC = 0.05f
         const val HOST_PLAYER_SPEED_FT_S = 18.5f
-        const val LOCAL_HIT_REACH_FT = 3.9f
-        const val REMOTE_GENEROUS_REACH_FT = 4.75f
-        const val MAX_HIT_HEIGHT_FT = 6.0f
+        const val LOCAL_HIT_REACH_FT = SinglePlayerMatch.PLAYER_REACH_FT
+        const val REMOTE_GENEROUS_REACH_FT = 5.15f
+        const val MAX_HIT_HEIGHT_FT = SinglePlayerMatch.MAX_HIT_HEIGHT_FT
         const val POINT_PAUSE_SEC = 1.6f
 
         fun mirrorX(x: Float): Float = CourtSpec.WORLD_WIDTH_FT - x
@@ -167,6 +167,8 @@ class OnlineMatch1v1(
 
     var autoSwingEnabled: Boolean = true
     private var autoSwingPrevDist = Float.POSITIVE_INFINITY
+    private var remoteAutoSwingPrevDist = Float.POSITIVE_INFINITY
+    private var guestAutoSwingPrevDist = Float.POSITIVE_INFINITY
 
     private var tickCounter = 0L
     private var accumulator = 0f
@@ -178,9 +180,22 @@ class OnlineMatch1v1(
     private var interpBallX = 14f
     private var interpBallY = 49f
     private var interpBallZ = 2.4f
+    private var interpBallVx = 0f
+    private var interpBallVy = 0f
+    private var interpBallVz = 0f
     private var interpRemoteX = CourtSpec.COURT_CENTER_X - 4.5f
     private var interpRemoteY = CourtSpec.COURT_TOP_Y + 1.1f
     private var pendingGuestSwipe: SwipeVector? = null
+    private var pendingGuestSwipeExpirySec = 0f
+    private var hasReceivedFirstSnapshot = false
+    private var prevSnapBallVz = 0f
+    private var prevSnapLastHitterGuest = false
+    private var localInferredBounces = 0
+    private var lastLocalPredictedSwingMs = 0L
+    private var guestBallExtrapRemainingSec = 0f
+    private var joyX = 0f
+    private var joyY = 0f
+    private var joyActive = false
 
     init {
         if (isHost) {
@@ -224,6 +239,10 @@ class OnlineMatch1v1(
         rallyPhase = RallyPhase.WAITING_SERVE
         rallyHits = 0
         lastFaultReason = null
+        autoSwingPrevDist = Float.POSITIVE_INFINITY
+        remoteAutoSwingPrevDist = Float.POSITIVE_INFINITY
+        pendingGuestSwipe = null
+        pendingGuestSwipeExpirySec = 0f
         scoreLocal = rules.scoreLower
         scoreRemote = rules.scoreUpper
         servingLocal = assign.servingSide == CourtSide.LOWER
@@ -312,7 +331,29 @@ class OnlineMatch1v1(
             ball.y <= CourtSpec.NET_Y + 0.8f
     }
 
+    fun canRemoteReachBall(): Boolean {
+        if (!isHost || rallyPhase != RallyPhase.RALLY_LIVE || !ball.active) return false
+        if (ball.lastHitterSide == CourtSide.UPPER) return false
+        if (ball.y < CourtSpec.NET_Y - 0.8f) return false
+        val dist = hypot(ball.x - remotePlayer.x, ball.y - remotePlayer.y)
+        return dist <= REMOTE_GENEROUS_REACH_FT && ball.z <= MAX_HIT_HEIGHT_FT + 1.0f
+    }
+
+    fun shouldGuestAutoSwingLocal(): Boolean {
+        if (isHost || !autoSwingEnabled || !canLocalReachBall() || localPlayerHitState() != PlayerHitState.READY) {
+            guestAutoSwingPrevDist = Float.POSITIVE_INFINITY
+            return false
+        }
+        val dist = hypot(ball.x - localPlayer.x, ball.y - localPlayer.y)
+        val leaving = dist > guestAutoSwingPrevDist
+        guestAutoSwingPrevDist = dist
+        return dist <= LOCAL_HIT_REACH_FT * 0.78f || leaving
+    }
+
     fun setLocalMoveTarget(worldX: Float, worldY: Float): PlayerInputSnapshot {
+        joyActive = false
+        joyX = 0f
+        joyY = 0f
         val maxY = if (rallyPhase == RallyPhase.WAITING_SERVE && servingLocal) {
             CourtSpec.COURT_BOTTOM_Y - 0.3f
         } else {
@@ -335,6 +376,70 @@ class OnlineMatch1v1(
         )
     }
 
+    /**
+     * Updates analog joystick direction (-1..1). Returns an optional RTDB input snapshot
+     * immediately when releasing so the remote host stops the guest right away.
+     */
+    fun setJoystickInput(normX: Float, normY: Float): PlayerInputSnapshot? {
+        if (rallyPhase == RallyPhase.MATCH_OVER) return null
+        val mag = hypot(normX, normY)
+        if (mag <= 0.08f) {
+            if (!joyActive) return null
+            joyActive = false
+            joyX = 0f
+            joyY = 0f
+            localPlayer.targetX = localPlayer.x
+            localPlayer.targetY = localPlayer.y
+            if (!isHost) {
+                inputSeqCounter += 1L
+                return PlayerInputSnapshot(
+                    uid = localUid,
+                    sequence = inputSeqCounter,
+                    targetX = localPlayer.x,
+                    targetY = localPlayer.y,
+                    swingType = null,
+                    aimX = 0f,
+                    aimY = 0f,
+                    swipeDurationSec = 0.2f,
+                    timestampMs = System.currentTimeMillis(),
+                )
+            }
+            return null
+        }
+        val clampedMag = min(1f, mag)
+        val scale = clampedMag / mag
+        joyX = normX * scale
+        joyY = normY * scale
+        joyActive = true
+        return null
+    }
+
+    fun buildJoystickInputSnapshot(): PlayerInputSnapshot? {
+        if (isHost || !joyActive) return null
+        val maxY = if (rallyPhase == RallyPhase.WAITING_SERVE && servingLocal) {
+            CourtSpec.COURT_BOTTOM_Y - 0.3f
+        } else {
+            CourtSpec.NET_Y - 0.6f
+        }
+        val lookaheadSec = 0.055f
+        val targetX = (localPlayer.x + joyX * HOST_PLAYER_SPEED_FT_S * lookaheadSec)
+            .coerceIn(1.5f, CourtSpec.WORLD_WIDTH_FT - 1.5f)
+        val targetY = (localPlayer.y + joyY * HOST_PLAYER_SPEED_FT_S * lookaheadSec)
+            .coerceIn(1.5f, maxY)
+        inputSeqCounter += 1L
+        return PlayerInputSnapshot(
+            uid = localUid,
+            sequence = inputSeqCounter,
+            targetX = targetX,
+            targetY = targetY,
+            swingType = null,
+            aimX = 0f,
+            aimY = 0f,
+            swipeDurationSec = 0.2f,
+            timestampMs = System.currentTimeMillis(),
+        )
+    }
+
     fun triggerLocalSwipe(swipe: SwipeVector): LocalSwipeResult {
         if (isHost) {
             val res = handleHostSwipe(swipe)
@@ -347,6 +452,8 @@ class OnlineMatch1v1(
             else classifySwipe(swipe)
         localPlayer.swingTimer = 0.22f
         localPlayer.lastSwingType = shotType
+        lastLocalPredictedSwingMs = System.currentTimeMillis()
+        guestAutoSwingPrevDist = Float.POSITIVE_INFINITY
 
         return LocalSwipeResult(
             guestInput = PlayerInputSnapshot(
@@ -385,16 +492,22 @@ class OnlineMatch1v1(
                 dyFt = -input.aimY,
                 durationSec = input.swipeDurationSec,
             )
+            pendingGuestSwipeExpirySec = 0.24f
         }
     }
 
     fun applyHostSnapshot(snapshot: MatchStateSnapshot) {
         if (isHost) return
 
+        val prevPhase = rallyPhase
         val wasInactive = !ball.active && rallyPhase != RallyPhase.RALLY_LIVE
         interpBallX = mirrorX(snapshot.ballX)
         interpBallY = mirrorY(snapshot.ballY)
         interpBallZ = snapshot.ballZ
+        interpBallVx = -snapshot.ballVx
+        interpBallVy = -snapshot.ballVy
+        interpBallVz = snapshot.ballVz
+        guestBallExtrapRemainingSec = if (snapshot.ballActive) 0.055f else 0f
         if (wasInactive || !snapshot.ballActive) {
             ball.x = interpBallX
             ball.y = interpBallY
@@ -404,16 +517,41 @@ class OnlineMatch1v1(
 
         interpRemoteX = mirrorX(snapshot.hostX)
         interpRemoteY = mirrorY(snapshot.hostY)
+        if (!hasReceivedFirstSnapshot) {
+            remotePlayer.x = interpRemoteX
+            remotePlayer.y = interpRemoteY
+        }
         remotePlayer.swingTimer = snapshot.hostSwingTimer
-        localPlayer.swingTimer = max(localPlayer.swingTimer, snapshot.guestSwingTimer)
+        if (System.currentTimeMillis() - lastLocalPredictedSwingMs > 380L) {
+            localPlayer.swingTimer = max(localPlayer.swingTimer, snapshot.guestSwingTimer)
+        }
 
         scoreLocal = snapshot.scoreGuest
         scoreRemote = snapshot.scoreHost
         servingLocal = snapshot.servingSide == "GUEST"
         syncedRallyShotCount = snapshot.rallyShotCount
-        syncedBallBouncesOnSide = snapshot.ballBouncesOnSide
-        syncedBallLastHitterLocal = snapshot.lastHitterSide == "GUEST"
-        ball.bouncesOnCurrentSide = snapshot.ballBouncesOnSide
+
+        if (snapshot.lastHitterSide != null) {
+            syncedBallLastHitterLocal = snapshot.lastHitterSide == "GUEST"
+            syncedBallBouncesOnSide = snapshot.ballBouncesOnSide
+            localInferredBounces = snapshot.ballBouncesOnSide
+        } else {
+            val inferredLastHitterGuest = snapshot.ballActive && snapshot.ballVy < -0.5f
+            if (!snapshot.ballActive || (inferredLastHitterGuest && !prevSnapLastHitterGuest)) {
+                localInferredBounces = 0
+            } else if (!inferredLastHitterGuest &&
+                interpBallY < CourtSpec.NET_Y &&
+                prevSnapBallVz < -0.2f &&
+                snapshot.ballVz > 0.2f
+            ) {
+                localInferredBounces += 1
+            }
+            prevSnapLastHitterGuest = inferredLastHitterGuest
+            syncedBallLastHitterLocal = inferredLastHitterGuest
+            syncedBallBouncesOnSide = localInferredBounces
+        }
+        prevSnapBallVz = snapshot.ballVz
+        ball.bouncesOnCurrentSide = syncedBallBouncesOnSide
         rallyHits = snapshot.rallyHits
         bestRally = max(bestRally, max(snapshot.rallyShotCount, rallyHits))
         lastCallout = snapshot.lastEvent ?: ""
@@ -425,17 +563,38 @@ class OnlineMatch1v1(
         }
 
         val eventText = snapshot.lastEvent ?: ""
-        rallyPhase = when {
+        val nextPhase = when {
             matchWinnerLocal != null -> RallyPhase.MATCH_OVER
             !snapshot.ballActive &&
                 snapshot.rallyShotCount == 0 &&
                 (eventText.contains("fault", ignoreCase = true) ||
                     eventText.contains("Out!", ignoreCase = true) ||
                     eventText.contains("Net!", ignoreCase = true) ||
-                    eventText.contains("bounce", ignoreCase = true)) -> RallyPhase.POINT_PAUSE
+                    eventText.contains("bounce", ignoreCase = true) ||
+                    eventText.contains("kitchen", ignoreCase = true) ||
+                    eventText.contains("violation", ignoreCase = true) ||
+                    eventText.contains("Point", ignoreCase = true)) -> RallyPhase.POINT_PAUSE
             !snapshot.ballActive -> RallyPhase.WAITING_SERVE
             else -> RallyPhase.RALLY_LIVE
         }
+        rallyPhase = nextPhase
+        if (nextPhase != RallyPhase.RALLY_LIVE) {
+            guestAutoSwingPrevDist = Float.POSITIVE_INFINITY
+        }
+
+        if (nextPhase == RallyPhase.WAITING_SERVE && (!hasReceivedFirstSnapshot || prevPhase != RallyPhase.WAITING_SERVE)) {
+            val maxY = if (servingLocal) CourtSpec.COURT_BOTTOM_Y - 0.3f else CourtSpec.NET_Y - 0.6f
+            val syncedGuestX = mirrorX(snapshot.guestX).coerceIn(1.5f, CourtSpec.WORLD_WIDTH_FT - 1.5f)
+            val syncedGuestY = mirrorY(snapshot.guestY).coerceIn(1.5f, maxY)
+            localPlayer.x = syncedGuestX
+            localPlayer.y = syncedGuestY
+            localPlayer.targetX = syncedGuestX
+            localPlayer.targetY = syncedGuestY
+            joyActive = false
+            joyX = 0f
+            joyY = 0f
+        }
+        hasReceivedFirstSnapshot = true
     }
 
     fun onRoomMetaUpdated(status: RoomStatus) {
@@ -520,8 +679,30 @@ class OnlineMatch1v1(
     )
 
     private fun stepGuest(dt: Float) {
-        moveTowardTarget(localPlayer, HOST_PLAYER_SPEED_FT_S, dt)
-        val lerpAlpha = min(1f, dt * 18f)
+        if (joyActive) {
+            val maxY = if (rallyPhase == RallyPhase.WAITING_SERVE && servingLocal) {
+                CourtSpec.COURT_BOTTOM_Y - 0.3f
+            } else {
+                CourtSpec.NET_Y - 0.6f
+            }
+            localPlayer.x = (localPlayer.x + joyX * HOST_PLAYER_SPEED_FT_S * dt)
+                .coerceIn(1.5f, CourtSpec.WORLD_WIDTH_FT - 1.5f)
+            localPlayer.y = (localPlayer.y + joyY * HOST_PLAYER_SPEED_FT_S * dt)
+                .coerceIn(1.5f, maxY)
+            localPlayer.targetX = localPlayer.x
+            localPlayer.targetY = localPlayer.y
+        } else {
+            moveTowardTarget(localPlayer, HOST_PLAYER_SPEED_FT_S, dt)
+        }
+        if (ball.active && guestBallExtrapRemainingSec > 0f) {
+            val extrapDt = min(dt, guestBallExtrapRemainingSec)
+            guestBallExtrapRemainingSec -= extrapDt
+            interpBallX = (interpBallX + interpBallVx * extrapDt)
+                .coerceIn(-2f, CourtSpec.WORLD_WIDTH_FT + 2f)
+            interpBallY = (interpBallY + interpBallVy * extrapDt)
+                .coerceIn(-3f, CourtSpec.WORLD_HEIGHT_FT + 3f)
+        }
+        val lerpAlpha = min(1f, dt * 20f)
         remotePlayer.x += (interpRemoteX - remotePlayer.x) * lerpAlpha
         remotePlayer.y += (interpRemoteY - remotePlayer.y) * lerpAlpha
         ball.x += (interpBallX - ball.x) * lerpAlpha
@@ -534,8 +715,22 @@ class OnlineMatch1v1(
 
     private fun stepHost(dt: Float): SimTickOutput {
         tickCounter += 1L
-        moveTowardTarget(localPlayer, HOST_PLAYER_SPEED_FT_S, dt)
-        moveTowardTarget(remotePlayer, HOST_PLAYER_SPEED_FT_S, dt)
+        if (joyActive) {
+            val maxY = if (rallyPhase == RallyPhase.WAITING_SERVE && servingLocal) {
+                CourtSpec.COURT_BOTTOM_Y - 0.3f
+            } else {
+                CourtSpec.NET_Y - 0.6f
+            }
+            localPlayer.x = (localPlayer.x + joyX * HOST_PLAYER_SPEED_FT_S * dt)
+                .coerceIn(1.5f, CourtSpec.WORLD_WIDTH_FT - 1.5f)
+            localPlayer.y = (localPlayer.y + joyY * HOST_PLAYER_SPEED_FT_S * dt)
+                .coerceIn(1.5f, maxY)
+            localPlayer.targetX = localPlayer.x
+            localPlayer.targetY = localPlayer.y
+        } else {
+            moveTowardTarget(localPlayer, HOST_PLAYER_SPEED_FT_S, dt)
+        }
+        moveTowardTarget(remotePlayer, HOST_PLAYER_SPEED_FT_S * 1.08f, dt)
         if (localPlayer.swingTimer > 0f) localPlayer.swingTimer = max(0f, localPlayer.swingTimer - dt)
         if (remotePlayer.swingTimer > 0f) remotePlayer.swingTimer = max(0f, remotePlayer.swingTimer - dt)
 
@@ -554,6 +749,7 @@ class OnlineMatch1v1(
                 val pending = pendingGuestSwipe
                 if (pending != null) {
                     pendingGuestSwipe = null
+                    pendingGuestSwipeExpirySec = 0f
                     val served = launchHostAuthoritativeServe(CourtSide.UPPER, pending)
                     return SimTickOutput(noEvents, served.hit, served.fault)
                 }
@@ -572,12 +768,43 @@ class OnlineMatch1v1(
         var guestHit: HitFeedback? = null
         val pending = pendingGuestSwipe
         if (pending != null) {
-            pendingGuestSwipe = null
-            val res = handleGuestSwingOnHost(pending)
-            guestHit = res.hit
-            if (res.fault != null) {
-                return SimTickOutput(noEvents, pointResolution = res.fault)
+            pendingGuestSwipeExpirySec -= dt
+            if (canRemoteReachBall()) {
+                pendingGuestSwipe = null
+                pendingGuestSwipeExpirySec = 0f
+                val res = handleGuestSwingOnHost(pending)
+                remoteAutoSwingPrevDist = Float.POSITIVE_INFINITY
+                guestHit = res.hit
+                if (res.fault != null) {
+                    return SimTickOutput(noEvents, pointResolution = res.fault)
+                }
+            } else if (pendingGuestSwipeExpirySec <= 0f || ball.lastHitterSide == CourtSide.UPPER) {
+                pendingGuestSwipe = null
+                pendingGuestSwipeExpirySec = 0f
             }
+        }
+
+        if (guestHit == null && autoSwingEnabled && canRemoteReachBall()) {
+            val dist = hypot(ball.x - remotePlayer.x, ball.y - remotePlayer.y)
+            val isVolley = ball.bouncesOnCurrentSide == 0
+            val wouldFault = isVolley && (
+                rules.rallyShotCount == 1 ||
+                    rules.rallyShotCount == 2 ||
+                    CourtSpec.isInKitchen(remotePlayer.x, remotePlayer.y, CourtSide.UPPER)
+                )
+            val leaving = dist > remoteAutoSwingPrevDist
+            remoteAutoSwingPrevDist = dist
+            if (!wouldFault && (dist <= REMOTE_GENEROUS_REACH_FT * 0.72f || leaving)) {
+                val swipe = pendingGuestSwipe ?: SwipeVector(0f, -6f, 0.15f)
+                pendingGuestSwipe = null
+                pendingGuestSwipeExpirySec = 0f
+                val res = handleGuestSwingOnHost(swipe)
+                remoteAutoSwingPrevDist = Float.POSITIVE_INFINITY
+                if (res.fault != null) return SimTickOutput(noEvents, pointResolution = res.fault)
+                guestHit = res.hit
+            }
+        } else {
+            remoteAutoSwingPrevDist = Float.POSITIVE_INFINITY
         }
 
         var hostAutoHit: HitFeedback? = null
@@ -748,6 +975,7 @@ class OnlineMatch1v1(
         bestRally = max(bestRally, rules.rallyShotCount)
         rallyHits = if (rules.rallyShotCount >= 3) rules.rallyShotCount else 0
         val guestPrefix = remoteDisplayName.ifBlank { "Guest" }
+        lastShotLabel = "$guestPrefix ${shotType.name}"
         lastCallout = "$guestPrefix ${shotType.name}"
 
         return ShotOutcome(

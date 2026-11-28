@@ -50,7 +50,7 @@ object GoogleAuthManager {
         onUnauthenticated: () -> Unit,
     ) {
         val existing = Firebase.auth.currentUser
-        if (existing != null) {
+        if (existing != null && !existing.isAnonymous) {
             onAuthSuccess(existing)
             return
         }

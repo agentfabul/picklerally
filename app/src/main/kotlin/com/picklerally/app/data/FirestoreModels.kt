@@ -121,6 +121,11 @@ data class LeaderboardRow(
     val rating: Int,
 )
 
+data class OnlineRankingSummary(
+    val rank: Int? = null,
+    val rating: Int = 1000,
+)
+
 data class FinishedMatchInput(
     val roomCode: String? = null,
     val mode: MatchRecordMode,

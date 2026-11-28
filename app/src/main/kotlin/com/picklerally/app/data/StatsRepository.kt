@@ -468,7 +468,7 @@ class StatsRepository(
         return try {
             val snap = db.collection(path)
                 .whereEqualTo("isPublic", true)
-                .limit(50)
+                .limit(200)
                 .get()
                 .await()
 
@@ -497,5 +497,46 @@ class StatsRepository(
             handleFirestoreError(e, OperationType.LIST, path)
             Result.failure(e)
         }
+    }
+
+    suspend fun fetchOnlineRankingSummary(
+        user: FirebaseUser?,
+        fallbackCharacter: CharacterId,
+    ): Result<OnlineRankingSummary> {
+        if (user == null || user.uid.isBlank()) {
+            val local = localPrefs.getLocalProfile(fallbackCharacter)
+            return Result.success(OnlineRankingSummary(rank = null, rating = local.rating))
+        }
+        val profile = fetchUserProfile(user, fallbackCharacter).getOrNull()
+        val fallbackRating = profile?.rating ?: localPrefs.getLocalProfile(fallbackCharacter).rating
+        val leaderboardResult = fetchLeaderboard(user, fallbackCharacter)
+        return leaderboardResult.fold(
+            onSuccess = { rows ->
+                val index = rows.indexOfFirst { it.uid == user.uid }
+                if (index >= 0) {
+                    Result.success(
+                        OnlineRankingSummary(
+                            rank = index + 1,
+                            rating = rows[index].rating,
+                        ),
+                    )
+                } else {
+                    Result.success(
+                        OnlineRankingSummary(
+                            rank = null,
+                            rating = fallbackRating,
+                        ),
+                    )
+                }
+            },
+            onFailure = {
+                Result.success(
+                    OnlineRankingSummary(
+                        rank = null,
+                        rating = fallbackRating,
+                    ),
+                )
+            },
+        )
     }
 }

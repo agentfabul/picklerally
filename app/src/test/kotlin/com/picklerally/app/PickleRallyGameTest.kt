@@ -1,6 +1,9 @@
 package com.picklerally.app
 
+import com.picklerally.app.data.DominantHand
 import com.picklerally.app.data.NearbyWirePacket
+import com.picklerally.app.data.OnlineRoomManager
+import com.picklerally.app.data.QueueCandidate
 import com.picklerally.app.game.BallState
 import com.picklerally.app.game.BotDifficulty
 import com.picklerally.app.game.CharacterId
@@ -28,6 +31,7 @@ import com.picklerally.app.game.SwipeVector
 import com.picklerally.app.game.classifySwipe
 import com.picklerally.app.game.computeTargetShotVelocity
 import com.picklerally.app.game.stepBallPhysics
+import com.picklerally.app.ui.components.CourtViewportMetrics
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -253,6 +257,88 @@ class PickleRallyGameTest {
     }
 
     @Test
+    fun onlineMatch1v1_handlesWebHostRtdbSnapshotsWithoutExtraFields() {
+        val guest = OnlineMatch1v1(isHost = false, localUid = "guest_uid")
+        val waitServeSnap = MatchStateSnapshot(
+            tick = 1L,
+            ballX = 18.5f,
+            ballY = 7.2f,
+            ballZ = 2.4f,
+            ballVx = 0f,
+            ballVy = 0f,
+            ballVz = 0f,
+            ballActive = false,
+            hostX = 18.5f,
+            hostY = 4.9f,
+            guestX = 9.5f,
+            guestY = 49.1f,
+            hostSwingTimer = 0f,
+            guestSwingTimer = 0f,
+            scoreHost = 0,
+            scoreGuest = 0,
+            servingSide = "HOST",
+            rallyShotCount = 0,
+            rallyHits = 0,
+            lastEvent = null,
+            matchWinner = null,
+            publishedAtMs = 1000L,
+            lastHitterSide = null,
+            ballBouncesOnSide = 0,
+        )
+        guest.applyHostSnapshot(waitServeSnap)
+        assertEquals(RallyPhase.WAITING_SERVE, guest.rallyPhase)
+        assertEquals(OnlineMatch1v1.mirrorX(9.5f), guest.localPlayer.x, 0.01f)
+        assertEquals(OnlineMatch1v1.mirrorY(49.1f), guest.localPlayer.y, 0.01f)
+
+        // Web host sends active ball coming toward Guest (host ballVy > 0 -> not hit by guest)
+        // First snapshot descending toward ground within Guest's reach on guest's court half
+        val descendingSnap = waitServeSnap.copy(
+            tick = 20L,
+            ballX = 9.5f,
+            ballY = 46.5f,
+            ballZ = 0.2f,
+            ballVy = 28.0f,
+            ballVz = -12.0f,
+            ballActive = true,
+            rallyShotCount = 1,
+        )
+        guest.applyHostSnapshot(descendingSnap)
+        repeat(25) { guest.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        assertEquals(0, guest.activeBallBouncesOnSide())
+        assertEquals(PlayerHitState.WAIT_BOUNCE, guest.localPlayerHitState())
+
+        // Next snapshot after bounce (ballVz flips positive while on guest half)
+        val bouncedSnap = descendingSnap.copy(
+            tick = 24L,
+            ballY = 46.0f,
+            ballZ = 1.6f,
+            ballVz = 10.5f,
+        )
+        guest.applyHostSnapshot(bouncedSnap)
+        repeat(25) { guest.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        assertEquals(1, guest.activeBallBouncesOnSide())
+        assertEquals(PlayerHitState.READY, guest.localPlayerHitState())
+
+        // Point pause callout from Web host triggers POINT_PAUSE
+        guest.applyHostSnapshot(
+            waitServeSnap.copy(
+                scoreHost = 1,
+                lastEvent = "Kitchen fault!",
+            ),
+        )
+        assertEquals(RallyPhase.POINT_PAUSE, guest.rallyPhase)
+    }
+
+    @Test
+    fun onlineRoomManager_normalizesCodesAndTruncatesProfileNames() {
+        assertEquals("PKL-427", OnlineRoomManager.normalizeRoomCode("427"))
+        assertEquals("PKL-427", OnlineRoomManager.normalizeRoomCode(" pkl-427 "))
+        assertEquals("Alex", OnlineRoomManager.sanitizeProfileName("  Alex  ", CharacterId.RIO))
+        assertEquals("FourteenCharac", OnlineRoomManager.sanitizeProfileName("FourteenCharacterLongName", CharacterId.RIO))
+        assertEquals("Gus", OnlineRoomManager.sanitizeProfileName("   ", CharacterId.GUS))
+    }
+
+    @Test
     fun profileNames_preserveHeroCharacterIdAndSerializeInNearbyPacket() {
         val match = OnlineMatch1v1(
             isHost = true,
@@ -321,5 +407,169 @@ class PickleRallyGameTest {
         assertFalse(invalidMargin.isValid)
         assertEquals(1024, MatchValidator.nextPlayerRating(1000, 24))
         assertEquals(800, MatchValidator.nextPlayerRating(805, -20))
+    }
+
+    @Test
+    fun onlineRoomManager_selectsAndSortsQueueCandidates() {
+        val nowMs = 1_000_000L
+        val myUid = "me_uid"
+        val myRating = 1050
+
+        val candidates = listOf(
+            // Self host -> excluded
+            QueueCandidate("PKL-101", host = myUid, name = "Me", characterId = "RIO", rating = 1050, createdAtMs = nowMs - 5_000L),
+            // Already claimed -> excluded
+            QueueCandidate("PKL-102", host = "u2", name = "Claimed", characterId = "LOLA", rating = 1050, createdAtMs = nowMs - 5_000L, claimedBy = "other"),
+            // Older than 90s -> excluded
+            QueueCandidate("PKL-103", host = "u3", name = "Stale", characterId = "BERT", rating = 1050, createdAtMs = nowMs - 95_000L),
+            // Invalid code -> excluded
+            QueueCandidate("BAD-104", host = "u4", name = "Bad", characterId = "RIO", rating = 1050, createdAtMs = nowMs - 5_000L),
+            // Valid, rating diff 30, newer
+            QueueCandidate("PKL-201", host = "u5", name = "FarNew", characterId = "MAYA", rating = 1080, createdAtMs = nowMs - 2_000L),
+            // Valid, rating diff 10, newer
+            QueueCandidate("PKL-202", host = "u6", name = "CloseNew", characterId = "KAI", rating = 1040, createdAtMs = nowMs - 10_000L),
+            // Valid, rating diff 10, older (should come before PKL-202)
+            QueueCandidate("PKL-203", host = "u7", name = "CloseOld", characterId = "ZOE", rating = 1060, createdAtMs = nowMs - 40_000L),
+            // Valid, exactly at 90s TTL boundary -> still included, rating diff 100
+            QueueCandidate("PKL-204", host = "u8", name = "EdgeTTL", characterId = "GUS", rating = 1150, createdAtMs = nowMs - 90_000L),
+        )
+
+        val selected = OnlineRoomManager.selectAndSortQueueCandidates(
+            candidates = candidates,
+            myUid = myUid,
+            myRating = myRating,
+            nowMs = nowMs,
+        )
+
+        assertEquals(
+            listOf("PKL-203", "PKL-202", "PKL-201", "PKL-204"),
+            selected.map { it.code },
+        )
+    }
+
+    @Test
+    fun courtViewportMetrics_respectsInsetsAndPreservesCourtProportions() {
+        val w = 1080f
+        val h = 2340f
+        val topInset = 190f
+        val bottomInset = 75f
+        val leftInset = 16f
+        val rightInset = 16f
+
+        val metrics = CourtViewportMetrics.compute(
+            canvasWidth = w,
+            canvasHeight = h,
+            topInsetPx = topInset,
+            bottomInsetPx = bottomInset,
+            leftInsetPx = leftInset,
+            rightInsetPx = rightInset,
+        )
+
+        val topLeft = metrics.worldToScreen(CourtSpec.COURT_LEFT_X, CourtSpec.COURT_TOP_Y)
+        val bottomRight = metrics.worldToScreen(CourtSpec.COURT_RIGHT_X, CourtSpec.COURT_BOTTOM_Y)
+
+        assertTrue(topLeft.x >= leftInset)
+        assertTrue(bottomRight.x <= w - rightInset)
+        // worldToScreen flips Y: COURT_TOP_Y (50f) is smaller screen Y than COURT_BOTTOM_Y (6f)
+        assertTrue(topLeft.y >= topInset)
+        assertTrue(bottomRight.y <= h - bottomInset)
+
+        val screenCourtWidth = bottomRight.x - topLeft.x
+        val screenCourtHeight = bottomRight.y - topLeft.y
+        assertEquals(CourtSpec.COURT_WIDTH_FT / CourtSpec.COURT_LENGTH_FT, screenCourtWidth / screenCourtHeight, 0.002f)
+
+        val (roundTripX, roundTripY) = metrics.screenToWorld(topLeft.x, topLeft.y)
+        assertEquals(CourtSpec.COURT_LEFT_X, roundTripX, 0.02f)
+        assertEquals(CourtSpec.COURT_TOP_Y, roundTripY, 0.02f)
+    }
+
+    @Test
+    fun onlineMatch1v1_hostAutoSwingsForGuestAndGuestPredictsLocalSwing() {
+        val host = OnlineMatch1v1(isHost = true, localUid = "host_uid")
+        host.triggerLocalSwipe(SwipeVector(0f, 5f, 0.15f))
+        assertEquals(RallyPhase.RALLY_LIVE, host.rallyPhase)
+
+        // Position ball just bounced on guest's (upper) side, within generous remote reach (4.7ft < 5.15f)
+        host.remotePlayer.x = 10f
+        host.remotePlayer.y = 44f
+        host.remotePlayer.targetX = 10f
+        host.remotePlayer.targetY = 44f
+        host.ball.x = 10f
+        host.ball.y = 39.4f // 4.6ft away -> > 4.3f local reach, inside 5.15f remote reach, moving away if vy < 0
+        host.ball.z = 2.2f
+        host.ball.vx = 0f
+        host.ball.vy = -8f
+        host.ball.vz = 3f
+        host.ball.bouncesOnCurrentSide = 1
+        host.ball.lastHitterSide = CourtSide.LOWER
+        host.ball.active = true
+
+        val res = host.update(CourtSpec.FIXED_TIMESTEP_SEC * 2f)
+        assertNotNull(res.hitFeedback)
+        assertEquals(CourtSide.UPPER, res.hitFeedback?.hitterSide)
+        assertEquals(CourtSide.UPPER, host.ball.lastHitterSide)
+        assertTrue(host.remotePlayer.swingTimer > 0f)
+
+        // Guest local prediction: immediate swing animation before host confirms
+        val guest = OnlineMatch1v1(isHost = false, localUid = "guest_uid")
+        val readySnap = host.buildSnapshot().copy(
+            ballX = OnlineMatch1v1.mirrorX(guest.localPlayer.x),
+            ballY = OnlineMatch1v1.mirrorY(guest.localPlayer.y + 0.8f),
+            ballZ = 2.0f,
+            ballVx = 0f,
+            ballVy = 12f,
+            ballVz = 2f,
+            ballActive = true,
+            lastHitterSide = "HOST",
+            ballBouncesOnSide = 1,
+            rallyShotCount = 1,
+            guestSwingTimer = 0f,
+        )
+        guest.applyHostSnapshot(readySnap)
+        repeat(25) { guest.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        assertTrue(guest.shouldGuestAutoSwingLocal())
+        val swipeRes = guest.triggerLocalSwipe(SwipeVector(0f, 6f, 0.15f))
+        assertNotNull(swipeRes.guestInput?.swingType)
+        assertTrue(guest.localPlayer.swingTimer > 0f)
+    }
+
+    @Test
+    fun joystickInput_movesProportionallyAndStopsImmediatelyOnRelease() {
+        val fullPushMatch = SinglePlayerMatch()
+        val halfPushMatch = SinglePlayerMatch()
+        fullPushMatch.launchServe(SwipeVector(0f, 5f, 0.15f))
+        halfPushMatch.launchServe(SwipeVector(0f, 5f, 0.15f))
+        val startX = fullPushMatch.player.x
+        val startY = fullPushMatch.player.y
+
+        fullPushMatch.setJoystickInput(0f, 1f)
+        halfPushMatch.setJoystickInput(0f, 0.5f)
+        repeat(12) {
+            fullPushMatch.update(CourtSpec.FIXED_TIMESTEP_SEC)
+            halfPushMatch.update(CourtSpec.FIXED_TIMESTEP_SEC)
+        }
+
+        val fullDeltaY = fullPushMatch.player.y - startY
+        val halfDeltaY = halfPushMatch.player.y - startY
+        assertEquals(startX, fullPushMatch.player.x, 0.001f)
+        assertTrue(fullDeltaY > 2.0f)
+        assertEquals(fullDeltaY * 0.5f, halfDeltaY, 0.25f)
+
+        // Releasing joystick locks target to current position and stops motion
+        fullPushMatch.setJoystickInput(0f, 0f)
+        val stoppedY = fullPushMatch.player.y
+        repeat(12) { fullPushMatch.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        assertEquals(stoppedY, fullPushMatch.player.y, 0.001f)
+
+        // Online guest emits immediate stop packet on joystick release and parses DominantHand safely
+        val guest = OnlineMatch1v1(isHost = false, localUid = "guest_uid")
+        assertNull(guest.setJoystickInput(0.7f, 0.7f))
+        repeat(6) { guest.update(CourtSpec.FIXED_TIMESTEP_SEC) }
+        val releaseSnap = guest.setJoystickInput(0f, 0f)
+        assertNotNull(releaseSnap)
+        assertEquals(guest.localPlayer.x, releaseSnap!!.targetX, 0.01f)
+        assertEquals(guest.localPlayer.y, releaseSnap.targetY, 0.01f)
+        assertEquals(DominantHand.LEFT, DominantHand.fromStringOrDefault("LEFT"))
+        assertEquals(DominantHand.RIGHT, DominantHand.fromStringOrDefault("unknown"))
     }
 }

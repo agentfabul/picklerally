@@ -97,6 +97,9 @@ class DoublesMatch(
     private var partnerHitCooldownSec = 0f
     private var upperHitCooldownSec = 0f
     private var autoSwingPrevDist = Float.POSITIVE_INFINITY
+    private var joyX = 0f
+    private var joyY = 0f
+    private var joyActive = false
 
     init {
         setupPointForServe()
@@ -239,6 +242,9 @@ class DoublesMatch(
 
     fun setPlayerMoveTarget(worldX: Float, worldY: Float) {
         if (rallyPhase == RallyPhase.MATCH_OVER) return
+        joyActive = false
+        joyX = 0f
+        joyY = 0f
         val maxY = if (
             rallyPhase == RallyPhase.WAITING_SERVE &&
             rules.servingSide == CourtSide.LOWER &&
@@ -250,6 +256,26 @@ class DoublesMatch(
         }
         player.targetX = max(1.5f, min(CourtSpec.WORLD_WIDTH_FT - 1.5f, worldX))
         player.targetY = max(1.5f, min(maxY, worldY))
+    }
+
+    fun setJoystickInput(normX: Float, normY: Float) {
+        if (rallyPhase == RallyPhase.MATCH_OVER) return
+        val mag = hypot(normX, normY)
+        if (mag <= 0.08f) {
+            if (joyActive) {
+                joyActive = false
+                joyX = 0f
+                joyY = 0f
+                player.targetX = player.x
+                player.targetY = player.y
+            }
+            return
+        }
+        val clampedMag = min(1f, mag)
+        val scale = clampedMag / mag
+        joyX = normX * scale
+        joyY = normY * scale
+        joyActive = true
     }
 
     fun playerHitState(): PlayerHitState {
@@ -364,7 +390,23 @@ class DoublesMatch(
     }
 
     private fun stepFixed(dt: Float): SimTickOutput {
-        moveTowardTarget(player, PLAYER_SPEED_FT_S, dt)
+        if (joyActive) {
+            val maxY = if (
+                rallyPhase == RallyPhase.WAITING_SERVE &&
+                rules.servingSide == CourtSide.LOWER &&
+                activeServerIndex() == 0
+            ) {
+                CourtSpec.COURT_BOTTOM_Y - 0.3f
+            } else {
+                CourtSpec.NET_Y - 0.6f
+            }
+            player.x = (player.x + joyX * PLAYER_SPEED_FT_S * dt).coerceIn(1.5f, CourtSpec.WORLD_WIDTH_FT - 1.5f)
+            player.y = (player.y + joyY * PLAYER_SPEED_FT_S * dt).coerceIn(1.5f, maxY)
+            player.targetX = player.x
+            player.targetY = player.y
+        } else {
+            moveTowardTarget(player, PLAYER_SPEED_FT_S, dt)
+        }
         moveTowardTarget(partner, PARTNER_SPEED_FT_S, dt)
         val oppSpeed = max(10f, BOT_PROFILES.getValue(difficulty).speedFtS + 0.8f)
         moveTowardTarget(upperTeam[0], oppSpeed, dt)
