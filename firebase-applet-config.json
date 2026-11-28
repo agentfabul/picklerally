@@ -4,6 +4,7 @@
   "apiKey": "AIzaSyCPah1LfS9fLoAlh_8ui9VE1A4xqzcxz64",
   "authDomain": "gen-lang-client-0455784437.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-android-pickleba-2d0444a4-b084-452c-8b43-778192b9db41",
+  "databaseURL": "https://gen-lang-client-0455784437-default-rtdb.firebaseio.com",
   "storageBucket": "gen-lang-client-0455784437.firebasestorage.app",
   "messagingSenderId": "79708452669",
   "measurementId": ""
