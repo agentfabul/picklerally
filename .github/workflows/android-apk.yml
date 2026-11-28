@@ -69,6 +69,9 @@ jobs:
         run: |
           if [ -f app/google-services.json ]; then
             echo "Using app/google-services.json from the repo"
+          elif [ -f .github/google-services.json ]; then
+            cp .github/google-services.json app/google-services.json
+            echo "Using .github/google-services.json from the repo"
           elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
             echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
             echo "Wrote app/google-services.json from the GOOGLE_SERVICES_JSON secret"
